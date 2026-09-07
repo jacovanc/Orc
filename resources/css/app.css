@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    [x-cloak] { display: none !important; }
+    ::selection { background: rgba(249, 115, 22, .35); color: white; }
+    body { letter-spacing: -0.01em; }
+}
+
+@layer components {
+    .ambient-glow {
+        @apply pointer-events-none fixed inset-x-0 top-0 h-[34rem];
+        background: radial-gradient(ellipse 55% 48% at 70% -8%, rgba(249, 115, 22, .15), transparent 68%), radial-gradient(ellipse 42% 35% at 20% -15%, rgba(251, 191, 36, .08), transparent 70%);
+    }
+    .logo-mark { @apply relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl bg-orange-500 shadow-lg shadow-orange-950/40; }
+    .logo-mark span { @apply absolute h-[3px] w-4 rounded-full bg-white; transform-origin: center; }
+    .logo-mark span:nth-child(1) { transform: translateY(-5px) rotate(8deg); }
+    .logo-mark span:nth-child(2) { transform: rotate(-8deg); }
+    .logo-mark span:nth-child(3) { transform: translateY(5px) rotate(8deg); }
+    .nav-item { @apply rounded-lg px-3 py-2 text-sm font-medium text-zinc-500 transition hover:bg-white/[0.04] hover:text-zinc-200; }
+    .nav-item-active { @apply bg-white/[0.06] text-white; }
+    .button-primary { @apply inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-orange-950/30 transition hover:bg-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2 focus:ring-offset-ink-950; }
+    .button-quiet { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-zinc-400 transition hover:bg-white/[0.06] hover:text-white; }
+    .button-danger { @apply inline-flex items-center justify-center rounded-xl border border-red-400/20 bg-red-400/10 px-4 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-red-400/20; }
+    .panel { @apply rounded-3xl border border-white/[0.08] bg-ink-900/80 shadow-xl shadow-black/10 backdrop-blur-sm; }
+    .eyebrow { @apply inline-flex items-center gap-2 font-mono text-xs font-medium uppercase tracking-[0.17em] text-zinc-500; }
+    .eyebrow span { @apply h-1.5 w-1.5 rounded-full bg-orange-400 shadow-[0_0_12px_rgba(251,146,60,.8)]; }
+    .field-label { @apply mb-2 block text-sm font-medium text-zinc-300; }
+    .field-help { @apply mt-2 text-xs leading-5 text-zinc-600; }
+    .field-input { @apply w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-700 focus:border-orange-500/70 focus:ring-orange-500/20; }
+    .status-pill { @apply inline-flex items-center gap-2 rounded-full border px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em]; }
+    .status-running { @apply border-orange-400/20 bg-orange-400/10 text-orange-300; }
+    .status-completed { @apply border-emerald-400/20 bg-emerald-400/10 text-emerald-300; }
+    .status-cancelled, .status-failed { @apply border-zinc-500/20 bg-zinc-500/10 text-zinc-400; }
+    .status-waiting { @apply border-amber-300/20 bg-amber-300/10 text-amber-200; }
+    .status-pill::before { content: ''; @apply h-1.5 w-1.5 rounded-full bg-current; }
+    .auth-card label { @apply text-zinc-300; }
+    .auth-card input { @apply border-white/10 bg-black/20 text-zinc-100 focus:border-orange-500 focus:ring-orange-500; }
+    .auth-card a { @apply text-zinc-400 hover:text-orange-300; }
+    .auth-card button[type="submit"] { @apply bg-orange-500 hover:bg-orange-400 focus:bg-orange-400 focus:ring-orange-500; }
+}

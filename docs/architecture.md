@@ -57,11 +57,11 @@ Human Review (human) --approve--------> Done (terminal)
 
 1. `WorkflowEngine` is the only application service allowed to start, complete, transition, or cancel a run.
 2. Mutations occur in database transactions while locking the workflow run and current stage attempt.
-3. A run has at most one active stage attempt (`pending` or `running`). A database-level partial unique index enforces this on PostgreSQL and SQLite; the engine also enforces it portably under the run lock.
+3. A run has at most one active stage attempt (`running` or `waiting`). A nullable `active_slot` plus a unique `(workflow_run_id, active_slot)` constraint enforces this portably: the active attempt owns slot `1`, while any number of closed attempts have `NULL`.
 4. A completion identifies the expected stage-attempt ID. A mismatched or already superseded attempt is rejected as stale.
 5. Repeating an identical completion request for the same completed attempt is idempotent and returns the unchanged run. A conflicting repeated outcome is rejected.
-6. Outcomes must exist as transitions on the attempt's stage. Terminal stages complete the workflow without another attempt.
-7. Attempt numbers are allocated under lock as `max(attempt_number) + 1`, so loops retain an ordered history.
+6. Outcomes must exist as transitions on the attempt's stage. Entering a terminal stage creates an immediately closed attempt, then completes the workflow.
+7. Attempt numbers are allocated under the run lock from the current (and therefore highest) attempt, so loops retain a monotonically ordered history.
 8. Cancelled, completed, and failed workflows cannot transition. Cancellation is idempotent and closes the current active attempt.
 9. Human actions are accepted only for the current active human attempt and only when permitted by the definition. `request_changes` requires a valid GitHub URL proving feedback was published; Orc records only that URL in the event metadata.
 10. Agent simulation is available only for agent attempts and is visibly marked as simulation in both the UI and event stream.
@@ -70,7 +70,7 @@ Human Review (human) --approve--------> Done (terminal)
 
 - A central `WorkflowEngine` owns start, completion, human action, simulation, and cancellation operations.
 - Thin authenticated controllers validate input, authorize the user, and delegate to the engine.
-- Route model binding is scoped through the authenticated user's runs; the seeded workflow definition is shared configuration.
+- Controllers return 404 unless a route-bound run belongs to the authenticated user; the engine repeats this ownership invariant at the mutation boundary. The seeded workflow definition is shared configuration.
 - Server-rendered Blade pages provide workflow list/start/detail views and require no JavaScript framework.
 
 ## Phase limitations
