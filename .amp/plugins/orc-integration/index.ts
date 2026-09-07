@@ -234,12 +234,14 @@ async function handleLaunch(
 
 	const body = decoder.decode(event.body)
 	const eventId = ctxHeader(event, 'x-orc-event-id')
+	const idempotencyKey = ctxHeader(event, 'idempotency-key')
 	const timestamp = ctxHeader(event, 'x-orc-timestamp')
 	const signature = ctxHeader(event, 'x-orc-signature')
 	verifyLaunchSignature(body, eventId, timestamp, signature, config.launchSigningSecret)
 
 	const payload = parseLaunch(body)
 	if (payload.event_id !== eventId) throw new Error('Signed launch event ID does not match the body.')
+	if (payload.idempotency_key !== idempotencyKey) throw new Error('Launch idempotency key does not match the body.')
 
 	const claim = await callback(config, payload, 'launch.claim', {}, ctx.signal)
 	if (!claim.accepted) throw new Error(`Orc rejected launch claim: ${claim.reason ?? 'unknown reason'}`)
