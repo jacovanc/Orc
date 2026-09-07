@@ -1,6 +1,6 @@
-# Orc Milestones 1–3: Domain and Architecture
+# Orc Milestones 1–5: Domain and Architecture
 
-This document defines the proposed domain before application code is introduced.
+This document defines the domain and the integration boundaries before each implementation phase is introduced.
 
 ## Boundary
 
@@ -9,7 +9,7 @@ Orc is an orchestration system, not a second source of truth for software work.
 - **GitHub owns** requirements, source code, implementation discussion, review discussion, and reports.
 - **Laravel stores** GitHub identifiers/URLs and the minimum workflow state required to orchestrate work.
 - Orc does not persist private prompts, issue bodies, generated reports, review feedback, or hidden development context.
-- During this phase, agent stages can be completed through an explicitly labelled simulation control. The control records only an outcome and a synthetic event; it does not call Amp or publish a GitHub comment. Real Amp execution and GitHub publication are future integrations.
+- Agent stages use narrowly scoped Amp proof agents in Milestones 4–5. They may read the selected issue, publish an explicitly labelled test report, and complete their attempt; they cannot edit code. The simulation control remains a local-development fallback when integration is disabled.
 
 ## Domain model
 
@@ -73,10 +73,31 @@ Human Review (human) --approve--------> Done (terminal)
 - Controllers return 404 unless a route-bound run belongs to the authenticated user; the engine repeats this ownership invariant at the mutation boundary. The seeded workflow definition is shared configuration.
 - Server-rendered Blade pages provide workflow list/start/detail views and require no JavaScript framework.
 
-## Phase limitations
+## Milestones 4–5 integration boundary
 
-- No real Amp thread/event creation or callbacks.
+### Directional authentication
+
+Laravel and the project-local Amp plugin use independent HMAC-SHA256 secrets. Laravel signs launch requests with the launch secret; Amp signs claims, acknowledgements, context lookups, completions, and safety-net failures with the callback secret. A signature covers the exact request body, a unique event ID, and a Unix timestamp. Receivers reject missing signatures, mismatched event IDs, and timestamps outside the configured skew window. The durable Amp webhook URL is also a bearer capability and is stored only in deployment configuration.
+
+The proof agent never receives either signing secret, the webhook URL, or a GitHub token. Its custom agent exposes only three closure-backed tools: read the bound GitHub issue, publish one labelled test report to that issue, and complete the bound workflow attempt. It has no shell, file, generic network, or code-editing tools.
+
+### At-most-once launch protocol
+
+Each agent `StageRun` gets one durable `AmpLaunch` record with stable event and idempotency keys. A queued Laravel job sends the same signed body and `Idempotency-Key` on every bounded retry. Delivery status and business launch status are separate so a callback may safely arrive before the launch HTTP response.
+
+Before creating a thread, the plugin obtains a transactional launch claim from Laravel. The first valid claim changes the persistent launch status from `pending` to `claimed`; duplicate webhook deliveries are denied. Only the holder of that claim calls `createThread({ executor: 'orb' })`, producing a fresh private thread and a fresh Orb for that stage attempt. Laravel then binds the returned thread ID to the still-current attempt. A retry never calls `createThread` after a claim, even if an acknowledgement was lost.
+
+This deliberately chooses at-most-once creation over blind recovery. A definitive non-retryable launch rejection is recorded as `failed`. Exhausted transport retries or failure after a claim are recorded as `ambiguous` and require inspection or cancellation; Orc never risks creating a duplicate Orb to hide uncertainty.
+
+### Callback processing
+
+Callback event IDs and payload hashes are persisted. Replaying the same event and payload returns the stored disposition; reusing an event ID with another payload is rejected. The central `WorkflowEngine` locks the callback event, launch, workflow, and expected attempt before binding a thread, transitioning an outcome, or recording a failure. A callback must identify the current attempt and its exact bound Amp thread. Cancelled workflows, superseded attempts, conflicting outcomes, and foreign threads are recorded as rejected integration events without mutating the workflow.
+
+An explicit `workflow_complete` tool is the normal completion path. A guarded `agent.end` hook gives the agent one corrective turn if it forgets the tool, then reports an agent failure rather than guessing an outcome. GitHub comment URLs are stored as report references; report text remains only on GitHub.
+
+## Current limitations
+
 - No workflow editor; definitions are seeded in code and the database.
-- No GitHub API calls or webhook ingestion.
 - No stored review-feedback text. Reviewers publish feedback on GitHub and submit its URL.
-- No background workers; simulated completions are synchronous.
+- Development and QA agents are harmless integration proofs only: they do not modify code, create branches, or open pull requests. Those capabilities begin in Milestone 6 or later.
+- Ambiguous launches are surfaced for operator action rather than automatically retried into a possible duplicate.

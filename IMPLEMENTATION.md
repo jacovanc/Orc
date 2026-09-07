@@ -1,4 +1,4 @@
-# Orc MVP implementation record
+# Orc implementation record
 
 ## Scope
 
@@ -13,6 +13,7 @@ Milestones 1–3: authenticated Laravel application, versioned workflow domain, 
 - 2026-09-07: Added regression coverage for transitions, both loop paths, numbered attempts, idempotency, competing outcomes, database active-attempt protection, invalid/stale/cancelled completions, human actions, append-only events, URL validation, and ownership.
 - 2026-09-07: Exercised Development → QA → Human Review → Done through the rendered UI with a real browser. Browser console/errors were empty. Visual inspection passed after removing an unnecessary timeline viewport cap.
 - 2026-09-07: Published commit `81493c8bf81fc3b1a53f5e65eeb13a767e7863b1` to `jacovanc/Orc` on GitHub, provisioned the Orc application and production environment on Laravel Cloud, attached a private persistent MySQL database, and deployed successfully.
+- 2026-09-07: Began Milestones 4–5 by inspecting the installed Amp Plugin API and durable webhook contract after loading the plugin and webhook skills. Documented the signed, claim-before-create, at-most-once launch protocol before implementation. GitHub access includes private repositories, but no issue was clearly designated as safe for integration comments; external proof remains pending an explicit repository/issue selection.
 
 ## Verification
 
