@@ -57,13 +57,15 @@ Workflow coverage includes the seeded graph, forward transitions, QA and review 
 
 ## Deployment
 
+The MVP is deployed at <https://orc-production-trttyo.laravel.cloud/> from the `main` branch of `jacovanc/Orc`.
+
 Laravel Cloud needs a database because workflow state and authentication are persistent. Configure an environment with:
 
 - `APP_ENV=production`
 - `APP_DEBUG=false`
 - a generated `APP_KEY`
 - the database variables provisioned by Laravel Cloud
-- build command: `composer install --no-dev --optimize-autoloader && npm ci && npm run build`
+- build command: `composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader && npm ci --audit false && npm run build`
 - deploy command: `php artisan migrate --force && php artisan db:seed --force`
 
 The seed is idempotent and creates the immutable Development workflow v1. Do not put GitHub or Amp credentials into source control.
