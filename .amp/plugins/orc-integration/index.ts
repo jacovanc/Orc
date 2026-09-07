@@ -59,7 +59,7 @@ const launches = new Map<string, LaunchPayload>()
 const safetyNudged = new Set<string>()
 const monitoredThreads = new Set<string>()
 
-export default async function (amp: PluginAPI) {
+export default function (amp: PluginAPI) {
 	const root = amp.system.workspaceRoot
 		? amp.helpers.filePathFromURI(amp.system.workspaceRoot)
 		: process.cwd()
@@ -198,8 +198,9 @@ export default async function (amp: PluginAPI) {
 		},
 	})
 
-	// Explicit tool lists resolve when the agent is created, so all three tools
-	// must be registered first. This agent intentionally has no built-in tools.
+	// Keep initialization synchronous through tool and mode publication. Webhook
+	// registration below must not hold these registrations behind async setup in
+	// each fresh worker Orb.
 	const proofAgent = amp.createAgent({
 		name: 'Orc Proof Agent',
 		model: 'openai/gpt-5-mini',
@@ -210,9 +211,11 @@ export default async function (amp: PluginAPI) {
 			'Use workflow_read_issue, then workflow_post_test_comment, then workflow_complete.',
 			'Keep the report factual and explicitly describe this as an Orc integration test.',
 		].join(' '),
-		// This project plugin defines only the three restricted tools above. Using a
-		// standalone agent avoids inheriting any built-in or MCP tool selection.
-		tools: ['plugin__*'],
+		tools: [
+			'workflow_read_issue',
+			'workflow_post_test_comment',
+			'workflow_complete',
+		],
 		reasoningEffort: 'low',
 		features: [],
 		display: { label: 'Orc proof', color: '#f97316' },
@@ -227,15 +230,18 @@ export default async function (amp: PluginAPI) {
 
 	amp.on('agent.end', async (event) => agentEndSafetyNet(event, config))
 
-	const registration = await amp.createWebhook({
+	void amp.createWebhook({
 		key: 'orc-stage-launch-v1',
 		headers: ['idempotency-key', 'x-orc-event-id', 'x-orc-timestamp', 'x-orc-signature'],
 		handler: async (event, ctx) => handleLaunch(event, ctx, config, proofAgent, amp),
+	}).then((registration) => {
+		mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 })
+		writeFileSync(webhookPath, registration.url, { mode: 0o600 })
+		chmodSync(webhookPath, 0o600)
+	}).catch(() => {
+		// Never log the capability URL or potentially credential-bearing details.
+		amp.logger.log('Orc webhook registration or publication failed.')
 	})
-
-	mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 })
-	writeFileSync(webhookPath, registration.url, { mode: 0o600 })
-	chmodSync(webhookPath, 0o600)
 }
 
 async function handleLaunch(
