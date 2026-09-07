@@ -281,6 +281,7 @@ async function handleLaunch(
 	let thread
 	try {
 		thread = await proofAgent.createThread({
+			parentThreadID: ctx.thread.id,
 			executor: 'orb',
 			visibility: 'private',
 			multiplayerTTLSeconds: null,
