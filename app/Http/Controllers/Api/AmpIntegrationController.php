@@ -22,6 +22,7 @@ class AmpIntegrationController extends Controller
                 'launch.claim',
                 'launch.acknowledged',
                 'launch.ambiguous',
+                'stage.reported',
                 'stage.completed',
                 'stage.failed',
             ])],
@@ -32,6 +33,8 @@ class AmpIntegrationController extends Controller
             'thread_id' => ['nullable', 'string', 'regex:/^T-[A-Za-z0-9-]+$/'],
             'outcome' => ['nullable', 'string', 'max:64'],
             'github_report_url' => ['nullable', 'url:https', 'max:2048'],
+            'github_report_comment_id' => ['nullable', 'integer', 'min:1'],
+            'report_nonce' => ['nullable', 'string', 'size:64'],
             'reason' => ['nullable', 'string', 'max:500'],
         ]);
 

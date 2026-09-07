@@ -18,6 +18,8 @@ class StageRun extends Model
         'outcome',
         'amp_thread_id',
         'amp_event_id',
+        'github_report_url',
+        'github_report_comment_id',
         'active_slot',
         'started_at',
         'completed_at',

@@ -34,6 +34,7 @@ class WorkflowEngine
         string $githubIssueUrl,
     ): WorkflowRun {
         $this->assertGitHubIssue($githubRepository, $githubIssueNumber, $githubIssueUrl);
+        $this->assertAmpTargetAuthorized($actor, $githubRepository);
 
         return DB::transaction(function () use (
             $actor,
@@ -354,6 +355,7 @@ class WorkflowEngine
                         'launch.claim' => $this->claimAmpLaunch($payload),
                         'launch.acknowledged' => $this->acknowledgeAmpLaunch($payload),
                         'launch.ambiguous' => $this->acceptAmpAmbiguity($payload),
+                        'stage.reported' => $this->recordAmpReport($payload),
                         'stage.completed' => $this->completeAmpStage($payload),
                         'stage.failed' => $this->failAmpStage($payload),
                     };
@@ -415,6 +417,9 @@ class WorkflowEngine
             'github_repository' => $attempt->workflowRun->github_repository,
             'github_issue_number' => $attempt->workflowRun->github_issue_number,
             'github_issue_url' => $attempt->workflowRun->github_issue_url,
+            'report_nonce' => $attempt->ampLaunch->report_nonce,
+            'github_report_url' => $attempt->github_report_url,
+            'github_report_comment_id' => $attempt->github_report_comment_id,
             'allowed_outcomes' => $attempt->stage->outgoingTransitions->pluck('outcome')->values()->all(),
             'is_active' => $attempt->active_slot === 1
                 && $attempt->workflowRun->status === WorkflowStatus::Running,
@@ -608,7 +613,6 @@ class WorkflowEngine
     {
         $threadId = $this->requiredThreadId($payload);
         $outcome = $payload['outcome'] ?? null;
-        $reportUrl = $payload['github_report_url'] ?? null;
         if (! is_string($outcome) || $outcome === '') {
             throw new WorkflowConflict('An Amp completion must include an outcome.');
         }
@@ -622,7 +626,18 @@ class WorkflowEngine
         }
 
         $this->bindAmpThread($launch->stageRun, $threadId);
-        $this->assertGitHubReport($launch->stageRun->workflowRun, $reportUrl);
+        $reportUrl = $launch->stageRun->github_report_url;
+        if ($launch->report_nonce) {
+            if (! $reportUrl || ! $launch->stageRun->github_report_comment_id) {
+                throw new WorkflowConflict('Amp must attest its GitHub report before completing.');
+            }
+            if (($payload['github_report_url'] ?? null) !== $reportUrl) {
+                throw new WorkflowConflict('The completion report does not match the attested GitHub report.');
+            }
+        } else {
+            $reportUrl = $payload['github_report_url'] ?? null;
+            $this->assertGitHubReport($launch->stageRun->workflowRun, $reportUrl);
+        }
 
         $run = $this->completeAttempt(
             $launch->stageRun->workflowRun,
@@ -647,6 +662,48 @@ class WorkflowEngine
             'workflow_status' => $run->status->value,
             'current_stage' => $run->currentStage->key,
         ];
+    }
+
+    private function recordAmpReport(array $payload): array
+    {
+        $threadId = $this->requiredThreadId($payload);
+        $reportUrl = $payload['github_report_url'] ?? null;
+        $commentId = $payload['github_report_comment_id'] ?? null;
+        $nonce = $payload['report_nonce'] ?? null;
+        $launch = $this->lockedAmpLaunch($payload);
+
+        if (! $launch->report_nonce || ! is_string($nonce) || ! hash_equals($launch->report_nonce, $nonce)) {
+            throw new WorkflowConflict('The GitHub report attestation is invalid.');
+        }
+
+        $this->assertCurrentAmpAttempt($launch->stageRun);
+        $this->bindAmpThread($launch->stageRun, $threadId);
+        $this->assertGitHubReport($launch->stageRun->workflowRun, $reportUrl, $commentId);
+
+        if ($launch->stageRun->github_report_url || $launch->stageRun->github_report_comment_id) {
+            if (
+                $launch->stageRun->github_report_url !== $reportUrl
+                || $launch->stageRun->github_report_comment_id !== $commentId
+            ) {
+                throw new WorkflowConflict('A different GitHub report is already attested for this attempt.');
+            }
+
+            return ['accepted' => true, 'disposition' => 'already_reported'];
+        }
+
+        $launch->stageRun->forceFill([
+            'github_report_url' => $reportUrl,
+            'github_report_comment_id' => $commentId,
+        ])->save();
+        $this->recordEvent($launch->stageRun->workflowRun, $launch->stageRun, 'stage.reported', null, [
+            'stage_key' => $launch->stageRun->stage->key,
+            'attempt_number' => $launch->stageRun->attempt_number,
+            'github_report_url' => $reportUrl,
+            'github_report_comment_id' => $commentId,
+            'amp_thread_id' => $threadId,
+        ]);
+
+        return ['accepted' => true, 'disposition' => 'reported'];
     }
 
     private function failAmpStage(array $payload): array
@@ -753,8 +810,11 @@ class WorkflowEngine
         return $payload['thread_id'];
     }
 
-    private function assertGitHubReport(WorkflowRun $run, mixed $reportUrl): void
-    {
+    private function assertGitHubReport(
+        WorkflowRun $run,
+        mixed $reportUrl,
+        mixed $commentId = null,
+    ): void {
         if (! is_string($reportUrl) || ! $this->isGitHubUrl($reportUrl)) {
             throw new WorkflowConflict('Amp must publish its stage report on GitHub before completing.');
         }
@@ -763,6 +823,13 @@ class WorkflowEngine
         $expectedPrefix = strtolower('/'.$run->github_repository.'/issues/'.$run->github_issue_number);
         if ($path !== $expectedPrefix) {
             throw new WorkflowConflict('The Amp report URL must belong to this workflow issue.');
+        }
+
+        if ($commentId !== null) {
+            $fragment = (string) parse_url($reportUrl, PHP_URL_FRAGMENT);
+            if (! is_int($commentId) || $fragment !== 'issuecomment-'.$commentId) {
+                throw new WorkflowConflict('The Amp report URL must match its GitHub comment ID.');
+            }
         }
     }
 
@@ -777,6 +844,7 @@ class WorkflowEngine
             [
                 'event_id' => (string) Str::uuid(),
                 'idempotency_key' => (string) Str::uuid(),
+                'report_nonce' => bin2hex(random_bytes(32)),
                 'delivery_status' => AmpDeliveryStatus::Pending,
                 'launch_status' => AmpLaunchStatus::Pending,
             ],
@@ -880,6 +948,26 @@ class WorkflowEngine
 
         if (! $this->isGitHubUrl($issueUrl) || $actualPath !== $expectedPath) {
             throw new WorkflowConflict('The GitHub issue URL must match the repository and issue number.');
+        }
+    }
+
+    private function assertAmpTargetAuthorized(User $actor, string $repository): void
+    {
+        if (! config('services.amp.enabled')) {
+            return;
+        }
+
+        $repositories = collect(config('services.amp.allowed_repositories', []))
+            ->map(fn (string $allowed): string => strtolower($allowed));
+        $users = collect(config('services.amp.allowed_user_emails', []))
+            ->map(fn (string $email): string => strtolower($email));
+
+        if ($repositories->isEmpty() || ! $repositories->contains(strtolower($repository))) {
+            throw new WorkflowConflict('This repository is not authorized for Amp workflow execution.');
+        }
+
+        if ($users->isEmpty() || ! $users->contains(strtolower($actor->email))) {
+            throw new WorkflowConflict('Your account is not authorized for Amp workflow execution.');
         }
     }
 

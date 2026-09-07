@@ -124,7 +124,11 @@ class WorkflowPagesTest extends TestCase
 
     public function test_amp_enabled_page_shows_dispatch_thread_and_report_without_simulation_controls(): void
     {
-        config(['services.amp.enabled' => true]);
+        config([
+            'services.amp.enabled' => true,
+            'services.amp.allowed_repositories' => ['acme/widgets'],
+            'services.amp.allowed_user_emails' => [$this->user->email],
+        ]);
         Queue::fake();
         $run = $this->startRun();
         $attempt = $run->activeStageRun;

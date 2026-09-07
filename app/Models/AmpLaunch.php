@@ -13,6 +13,7 @@ class AmpLaunch extends Model
         'stage_run_id',
         'event_id',
         'idempotency_key',
+        'report_nonce',
         'payload_hash',
         'delivery_status',
         'launch_status',

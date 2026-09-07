@@ -46,6 +46,8 @@ class AmpIntegrationTest extends TestCase
             'services.amp.launch_signing_secret' => 'launch-test-secret',
             'services.amp.callback_signing_secret' => 'callback-test-secret',
             'services.amp.signature_tolerance_seconds' => 300,
+            'services.amp.allowed_repositories' => ['acme/widgets'],
+            'services.amp.allowed_user_emails' => [$this->user->email],
         ]);
         Queue::fake();
     }
@@ -58,10 +60,32 @@ class AmpIntegrationTest extends TestCase
         $this->assertNotNull($launch);
         $this->assertTrue(Str::isUuid($launch->event_id));
         $this->assertTrue(Str::isUuid($launch->idempotency_key));
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $launch->report_nonce);
         $this->assertSame(AmpDeliveryStatus::Pending, $launch->delivery_status);
         $this->assertSame(AmpLaunchStatus::Pending, $launch->launch_status);
         Queue::assertPushed(DeliverAmpLaunch::class, 1);
         $this->assertSame(1, $run->events()->where('type', 'stage.launch_queued')->count());
+    }
+
+    public function test_amp_launches_require_an_allowed_repository_and_user(): void
+    {
+        config(['services.amp.allowed_repositories' => []]);
+
+        try {
+            $this->startRun();
+            $this->fail('An empty repository allowlist must fail closed.');
+        } catch (WorkflowConflict $exception) {
+            $this->assertStringContainsString('repository is not authorized', $exception->getMessage());
+        }
+
+        config([
+            'services.amp.allowed_repositories' => ['acme/widgets'],
+            'services.amp.allowed_user_emails' => [],
+        ]);
+
+        $this->expectException(WorkflowConflict::class);
+        $this->expectExceptionMessage('account is not authorized');
+        $this->startRun();
     }
 
     public function test_simulation_cannot_bypass_an_enabled_amp_integration(): void
@@ -147,6 +171,12 @@ class AmpIntegrationTest extends TestCase
         $launch->update(['delivery_status' => AmpDeliveryStatus::Delivering]);
 
         $this->ampCallback($launch, 'launch.claim');
+        $this->attestReport(
+            $launch,
+            $this->threadId(1),
+            'https://github.com/acme/widgets/issues/42#issuecomment-101',
+            101,
+        );
         $this->ampCallback($launch, 'stage.completed', [
             'thread_id' => $this->threadId(1),
             'outcome' => 'success',
@@ -177,6 +207,12 @@ class AmpIntegrationTest extends TestCase
         $developmentLaunch = $run->activeStageRun->ampLaunch;
         $this->ampCallback($developmentLaunch, 'launch.claim');
         $this->ampCallback($developmentLaunch, 'launch.acknowledged', ['thread_id' => $this->threadId(1)]);
+        $this->attestReport(
+            $developmentLaunch,
+            $this->threadId(1),
+            'https://github.com/acme/widgets/issues/42#issuecomment-101',
+            101,
+        );
         $this->ampCallback($developmentLaunch, 'stage.completed', [
             'thread_id' => $this->threadId(1),
             'outcome' => 'success',
@@ -187,6 +223,12 @@ class AmpIntegrationTest extends TestCase
         $qaLaunch = $run->activeStageRun->ampLaunch;
         $this->ampCallback($qaLaunch, 'launch.claim');
         $this->ampCallback($qaLaunch, 'launch.acknowledged', ['thread_id' => $this->threadId(2)]);
+        $this->attestReport(
+            $qaLaunch,
+            $this->threadId(2),
+            'https://github.com/acme/widgets/issues/42#issuecomment-102',
+            102,
+        );
         $result = $this->ampCallback($qaLaunch, 'stage.completed', [
             'thread_id' => $this->threadId(2),
             'outcome' => 'pass',
@@ -232,15 +274,85 @@ class AmpIntegrationTest extends TestCase
         $launch = $run->activeStageRun->ampLaunch;
         $this->ampCallback($launch, 'launch.claim');
 
-        $result = $this->ampCallback($launch, 'stage.completed', [
+        $result = $this->ampCallback($launch, 'stage.reported', [
             'thread_id' => $this->threadId(1),
-            'outcome' => 'success',
             'github_report_url' => 'https://github.com/acme/widgets/issues/420#issuecomment-101',
+            'github_report_comment_id' => 101,
+            'report_nonce' => $launch->report_nonce,
         ]);
 
         $this->assertFalse($result['accepted']);
         $this->assertStringContainsString('this workflow issue', $result['reason']);
         $this->assertSame(StageRunStatus::Running, $run->activeStageRun->fresh()->status);
+    }
+
+    public function test_completion_requires_nonce_bound_durable_report_attestation(): void
+    {
+        $run = $this->startRun();
+        $launch = $run->activeStageRun->ampLaunch;
+        $this->ampCallback($launch, 'launch.claim');
+
+        $completion = $this->ampCallback($launch, 'stage.completed', [
+            'thread_id' => $this->threadId(1),
+            'outcome' => 'success',
+            'github_report_url' => 'https://github.com/acme/widgets/issues/42#issuecomment-101',
+        ]);
+        $this->assertFalse($completion['accepted']);
+        $this->assertStringContainsString('attest its GitHub report', $completion['reason']);
+
+        $wrongNonce = $this->ampCallback($launch, 'stage.reported', [
+            'thread_id' => $this->threadId(1),
+            'github_report_url' => 'https://github.com/acme/widgets/issues/42#issuecomment-101',
+            'github_report_comment_id' => 101,
+            'report_nonce' => str_repeat('0', 64),
+        ]);
+        $this->assertFalse($wrongNonce['accepted']);
+        $this->assertStringContainsString('attestation is invalid', $wrongNonce['reason']);
+
+        $first = $this->attestReport(
+            $launch,
+            $this->threadId(1),
+            'https://github.com/acme/widgets/issues/42#issuecomment-101',
+            101,
+        );
+        $duplicate = $this->attestReport(
+            $launch,
+            $this->threadId(1),
+            'https://github.com/acme/widgets/issues/42#issuecomment-101',
+            101,
+        );
+
+        $this->assertSame('reported', $first['disposition']);
+        $this->assertSame('already_reported', $duplicate['disposition']);
+        $this->assertSame(101, $launch->stageRun->fresh()->github_report_comment_id);
+        $this->assertSame(1, $run->events()->where('type', 'stage.reported')->count());
+    }
+
+    public function test_signed_report_attestation_callback_is_validated_and_persisted(): void
+    {
+        $run = $this->startRun();
+        $launch = $run->activeStageRun->ampLaunch;
+        $this->ampCallback($launch, 'launch.claim');
+        $payload = $this->payload($launch, 'stage.reported', [
+            'thread_id' => $this->threadId(1),
+            'github_report_url' => 'https://github.com/acme/widgets/issues/42#issuecomment-201',
+            'github_report_comment_id' => 201,
+            'report_nonce' => $launch->report_nonce,
+        ]);
+
+        $this->postRawCallback($payload)
+            ->assertOk()
+            ->assertJson([
+                'accepted' => true,
+                'disposition' => 'reported',
+            ]);
+
+        $attempt = $run->activeStageRun->fresh();
+        $this->assertSame(201, $attempt->github_report_comment_id);
+        $this->assertSame(
+            'https://github.com/acme/widgets/issues/42#issuecomment-201',
+            $attempt->github_report_url,
+        );
     }
 
     public function test_cancelled_and_stale_attempt_callbacks_are_persistently_rejected(): void
@@ -329,6 +441,20 @@ class AmpIntegrationTest extends TestCase
         $body = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 
         return $this->engine->handleAmpCallback($payload, hash('sha256', $body));
+    }
+
+    private function attestReport(
+        AmpLaunch $launch,
+        string $threadId,
+        string $reportUrl,
+        int $commentId,
+    ): array {
+        return $this->ampCallback($launch, 'stage.reported', [
+            'thread_id' => $threadId,
+            'github_report_url' => $reportUrl,
+            'github_report_comment_id' => $commentId,
+            'report_nonce' => $launch->report_nonce,
+        ]);
     }
 
     private function payload(AmpLaunch $launch, string $type, array $extra = []): array

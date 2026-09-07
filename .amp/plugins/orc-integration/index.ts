@@ -69,9 +69,11 @@ export default function (amp: PluginAPI) {
 			'Use workflow_read_issue, then workflow_post_test_comment, then workflow_complete.',
 			'Keep the report factual and explicitly describe this as an Orc integration test.',
 		].join(' '),
-		// orc-worker is the only global plugin that publishes tools in this project;
-		// it stays inert elsewhere unless Orc's project-scoped secrets are present.
-		tools: ['plugin__*'],
+		tools: [
+			'workflow_read_issue',
+			'workflow_post_test_comment',
+			'workflow_complete',
+		],
 		reasoningEffort: 'low',
 		features: [],
 		display: { label: 'Orc proof', color: '#f97316' },
