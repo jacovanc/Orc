@@ -19,6 +19,9 @@ Milestones 1–5: authenticated Laravel application, versioned workflow domain, 
 - 2026-09-07: Added integration UI states for dispatch, delivery, launch ambiguity/failure, real thread links, and GitHub report links. Simulation controls now appear only when Amp integration is disabled.
 - 2026-09-07: Deployed integration commit `ff5732952ed511ffa2fced9d4fa00a7e008782cd` without destructive database changes. Provisioned one supervised Laravel Cloud database queue worker dedicated to `amp-launches` and configured the separate directional secrets with integration disabled until the durable Amp webhook is activated.
 - 2026-09-07: Live proof remains pending because this already-running thread has no `load_plugin`/`reload_plugins` tool and standalone `amp plugins` execution is correctly denied `amp.createWebhook`. The user was asked to run `plugins: reload` in the same thread; no webhook capability was exposed or fabricated.
+- 2026-09-07: Activated the durable controller webhook, enabled production integration, and verified repeated failed proof attempts failed closed: no guessed transition or duplicate Orb was created, and the safety net never made code changes. Diagnostics showed fresh-Orb custom agents cannot resolve project-local worker tool registrations, so the restricted worker was installed as User Plugin `orc-worker`; it stays inert unless Orc project-scoped configuration is present.
+- 2026-09-07: Corrected project-scoped Amp values to exactly match production (including removing trailing newlines introduced by temporary data files). The credentials remained in owner-only files and secret stores and were never printed.
+- 2026-09-07: Production `RUN-0015` proved the complete Milestones 4–5 path: Development fresh Orb/thread `T-01a07db9-0dc5-752c-a503-8be0cc5ce95d` read issue `jacovanc/Orc#1`, published its labelled report, and completed `success`; QA fresh Orb/thread `T-01a07db9-7853-759c-8e74-ebfdb89e0911` read the issue and Development report, published its own labelled report, and completed `pass`; Laravel transactionally entered waiting Human Review. Both Amp records report sandbox executors and distinct thread IDs.
 
 ## Verification
 
@@ -34,6 +37,8 @@ Milestones 1–5: authenticated Laravel application, versioned workflow domain, 
 - Milestones 4–5 integration tests: **12 passed, 66 assertions**; full suite after integration: **55 passed, 222 assertions**.
 - Amp plugin bundle check: `bun build ... --external @ampcode/plugin --target bun` succeeded. `amp plugins list` parsed the plugin and reached the expected managed-Orb-only `createWebhook` guard in standalone CLI mode.
 - Rendered integration states passed browser console/error checks and visual inspection: `.amp/in/artifacts/amp-launch-pending.png` and `.amp/in/artifacts/amp-proof-human-review.png`.
+- Real production proof links: Development report <https://github.com/jacovanc/Orc/issues/1#issuecomment-5575693984> and QA report <https://github.com/jacovanc/Orc/issues/1#issuecomment-5575697936>. Both associated Amp threads used exactly three workflow tools and completed with the expected outcomes.
+- Real authenticated production screenshot `.amp/in/artifacts/amp-production-human-review.png`: visually inspected **PASS**; it shows `RUN-0015`, completed Development/QA attempts with thread and report links, waiting Human Review actions, no visible secrets, and no rendering defects.
 - Laravel Cloud deployment `depl-a2b0ead3-da4a-4a12-9e4d-b82fb1a5c500`: **`deployment.succeeded`**, source commit `ff5732952ed511ffa2fced9d4fa00a7e008782cd`.
 - Laravel Cloud background process `process-a2b0eb69-ac71-4ef1-806e-93a70c442d92`: one database worker on queue `amp-launches`, four tries, bounded backoff, and a 30-second worker timeout.
 
@@ -47,4 +52,5 @@ Production is live at <https://orc-production-trttyo.laravel.cloud/>.
 - Database: private Laravel MySQL 8.4 cluster `orc-production`, 512 MB flexible compute, 5 GB storage, scheduled snapshots with two-day retention, and a 60-second idle suspend interval.
 - Environment variables include a Laravel Cloud-managed `APP_KEY`, production mode with debug disabled, the canonical application URL, and stderr logging. Secret values were never printed or committed.
 - Build uses optimized production Composer dependencies and compiled Vite assets. Deploy runs `php artisan migrate --force && php artisan db:seed --force`.
-- Integration variables and independent secrets are configured without exposing their values. `AMP_INTEGRATION_ENABLED` remains false until plugin activation supplies the durable capability URL; enabling before that would create definitively failed launches.
+- Integration variables and independent directional secrets are configured without exposing their values. `AMP_INTEGRATION_ENABLED` is active; the deployed database queue worker delivers to the durable controller webhook.
+- The deployed Laravel backend is commit `290bb3a9106c9898c9468443ab93e83fed3ed0bd`; later commits through the final Milestones 4–5 handoff update plugin behavior and documentation without changing the deployed PHP/runtime assets.

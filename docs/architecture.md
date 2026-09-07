@@ -77,9 +77,9 @@ Human Review (human) --approve--------> Done (terminal)
 
 ### Directional authentication
 
-Laravel and the project-local Amp plugin use independent HMAC-SHA256 secrets. Laravel signs launch requests with the launch secret; Amp signs claims, acknowledgements, context lookups, completions, and safety-net failures with the callback secret. A signature covers the exact request body, a unique event ID, and a Unix timestamp. Receivers reject missing signatures, mismatched event IDs, and timestamps outside the configured skew window. The durable Amp webhook URL is also a bearer capability and is stored only in deployment configuration.
+Laravel and the Amp integration use independent HMAC-SHA256 secrets. Laravel signs launch requests with the launch secret; Amp signs claims, acknowledgements, context lookups, completions, and safety-net failures with the callback secret. A signature covers the exact request body, a unique event ID, and a Unix timestamp. Receivers reject missing signatures, mismatched event IDs, and timestamps outside the configured skew window. The durable Amp webhook URL is also a bearer capability and is stored only in deployment configuration.
 
-The proof agent never receives either signing secret, the webhook URL, or a GitHub token. Its custom agent exposes only three closure-backed tools: read the bound GitHub issue, publish one labelled test report to that issue, and complete the bound workflow attempt. It has no shell, file, generic network, or code-editing tools.
+The project-local plugin owns webhook registration, launch claims, thread creation, and monitoring. A global User Plugin publishes the three worker tools in fresh Orbs; it returns without registering anything unless Orc's project-scoped configuration is present. The proof agent never receives either signing secret, the webhook URL, or a GitHub token. Its custom agent exposes only three closure-backed tools: read the bound GitHub issue, publish one labelled test report to that issue, and complete the bound workflow attempt. It has no shell, file, generic network, or code-editing tools.
 
 ### At-most-once launch protocol
 

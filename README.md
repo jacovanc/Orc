@@ -12,7 +12,7 @@ Milestones 1–5 are implemented as an authenticated, server-rendered MVP with a
 - Append-only workflow events and stable historical stage attempts.
 - Authenticated list, manual start, detail, status, stage graph, attempt table, event timeline, GitHub links, human actions, and cancellation pages.
 - Durable queued Amp launches with bounded retries, stable idempotency keys, explicit ambiguous outcomes, persistent callback deduplication, and separate delivery/business state.
-- A project-local Amp plugin that claims before creating one fresh private thread and Orb per agent attempt, exposes only harmless proof tools, and returns signed completions.
+- A project-local Amp controller plugin plus a restricted User Plugin worker that claim before creating one fresh private thread and Orb per agent attempt, expose only harmless proof tools, and return signed completions.
 - Explicit agent simulation controls when the integration is disabled, so orchestration can still be exercised without Amp.
 - Laravel Breeze authentication and owner-scoped workflow access.
 
@@ -33,9 +33,10 @@ Orc does **not** store issue bodies, prompts, generated code, reports, discussio
 The integration is disabled by default. It requires a database queue worker and two independent, randomly generated HMAC secrets—one for Laravel→Amp launches and another for Amp→Laravel callbacks.
 
 1. Put the callback base URL and secrets in the gitignored `.amp/runtime/orc-plugin.json` with owner-only permissions.
-2. Reload the checked-in `.amp/plugins/orc-integration` plugin from an Amp-managed Orb. It writes its durable capability URL to gitignored `.amp/runtime/launch-webhook-url`.
-3. Configure the matching Laravel variables listed in `.env.example`, set `QUEUE_CONNECTION=database`, and run a worker for the `amp-launches` queue.
-4. Enable `AMP_INTEGRATION_ENABLED` only after both callback and launch directions are configured.
+2. Install the restricted `orc-worker` User Plugin and store the same callback URL, callback secret, launch secret, and GitHub token as Orc project-scoped Amp configuration. The worker remains inert in projects without that configuration.
+3. Reload the checked-in `.amp/plugins/orc-integration` controller plugin from an Amp-managed Orb. It writes its durable capability URL to gitignored `.amp/runtime/launch-webhook-url`.
+4. Configure the matching Laravel variables listed in `.env.example`, set `QUEUE_CONNECTION=database`, and run a worker for the `amp-launches` queue.
+5. Enable `AMP_INTEGRATION_ENABLED` only after both callback and launch directions are configured.
 
 Never commit, log, or show the secrets, GitHub token, or webhook URL. Exact configuration, rotation, failure handling, and proof-agent boundaries are in [docs/amp-integration.md](docs/amp-integration.md).
 

@@ -8,7 +8,8 @@ This runbook covers Orc Milestones 4–5. It intentionally does not grant agents
 - `DeliverAmpLaunch` sends launch commands on the `amp-launches` database queue with 3-second connect and 10-second request timeouts, four total attempts, and bounded backoff.
 - `AmpIntegrationEvent` persistently deduplicates signed callback event IDs and payload hashes. It is append-only.
 - `WorkflowEngine` remains the only workflow mutation boundary. It locks launch, run, and attempt rows before accepting claims, thread bindings, completions, failures, or transitions.
-- `.amp/plugins/orc-integration` owns the durable Amp webhook, fresh Orb/thread creation, restricted proof agent, GitHub report publication, and signed callbacks.
+- `.amp/plugins/orc-integration` is the project-local controller: it owns the durable webhook, launch claims, fresh Orb/thread creation, prompts, and safety monitoring.
+- The `orc-worker` User Plugin is loaded in every fresh Orb but registers tools only when Orc project configuration is present. It owns bound-issue reads, idempotent GitHub report publication, and signed `workflow_complete` callbacks.
 
 ## Secret and capability setup
 
@@ -27,7 +28,9 @@ Create gitignored `.amp/runtime/orc-plugin.json` with mode `0600`:
 
 Use a least-privilege fine-grained GitHub token: read Issues metadata/content and write issue comments only for repositories explicitly approved for proof runs. The token remains in the plugin process and is never returned by a model-facing tool.
 
-Fresh agent Orbs cannot inherit the gitignored file. Store the same values as Amp project-scoped configuration so the plugin can initialize there: `ORC_CALLBACK_URL` as an environment variable, plus secret values `ORC_LAUNCH_SIGNING_SECRET`, `ORC_CALLBACK_SIGNING_SECRET`, and `ORC_GITHUB_TOKEN`. Values are injected into Orb processes but never returned by `amp secrets list` or exposed to the proof model. The local owner-only file remains the source for the webhook-hosting Orb.
+Fresh agent Orbs cannot inherit the gitignored file. Install the `orc-worker` User Plugin, then store the same values as Amp project-scoped configuration so it can initialize there: `ORC_CALLBACK_URL` as an environment variable, plus secret values `ORC_LAUNCH_SIGNING_SECRET`, `ORC_CALLBACK_SIGNING_SECRET`, and `ORC_GITHUB_TOKEN`. Values are injected into Orb processes but never returned by `amp secrets list` or exposed to the proof model. The local owner-only file remains the source for the webhook-hosting Orb.
+
+When setting values with `amp secrets set --data-file`, ensure the file contains the exact value with no trailing newline. HMAC secrets and bearer tokens are byte-sensitive. After changing project values, run `amp orb restart-processes` and reload plugins before launching another proof.
 
 Reload the project plugin from an Amp-managed Orb. Re-registering key `orc-stage-launch-v1` restores the same durable webhook. The plugin writes the capability URL to `.amp/runtime/launch-webhook-url` with mode `0600`; treat that URL like a password.
 
@@ -62,8 +65,8 @@ The webhook capability is not the authentication mechanism by itself. Laravel si
 2. The worker retries the exact launch body with the same event and idempotency keys.
 3. Before any thread creation, the plugin sends `launch.claim`. Laravel atomically grants only the first valid claim.
 4. The plugin creates a private thread with `executor: "orb"`, then sends `launch.acknowledged` with its thread ID.
-5. The plugin appends a stage-specific proof prompt. The model can call only `workflow_read_issue`, `workflow_post_test_comment`, and `workflow_complete`.
-6. The explicit completion tool requires the labelled GitHub report first, then sends `stage.completed` with the permitted outcome and report URL.
+5. The controller appends a stage-specific proof prompt. The custom model can call only the three tools published by `orc-worker`: `workflow_read_issue`, `workflow_post_test_comment`, and `workflow_complete`.
+6. The explicit worker completion tool requires the labelled GitHub report first, then sends `stage.completed` with the original launch event ID, permitted outcome, and report URL.
 7. Laravel verifies the exact current attempt and bound thread, then transitions through the central engine. Entering another agent stage creates another `AmpLaunch`, fresh thread, and fresh Orb.
 
 Callback events are persistent. An exact replay returns the stored response; reusing an event ID with another payload is rejected. This also makes a callback that arrives before the launch HTTP response safe: business launch state advances independently, and the worker records delivery without regressing it.
@@ -99,3 +102,14 @@ There remains an unavoidable distributed race between the final active-context r
 7. Inspect the authenticated run page for thread/report links and review-only actions.
 
 The designated public proof issue is <https://github.com/jacovanc/Orc/issues/1>. Do not infer private-repository access from this public proof; private access must be verified separately against an explicitly approved private test issue.
+
+### Verified production proof
+
+Production run `RUN-0015` completed Development with `success`, completed QA with `pass`, and reached waiting Human Review on 2026-09-07:
+
+- Development fresh Orb/thread: <https://ampcode.com/threads/T-01a07db9-0dc5-752c-a503-8be0cc5ce95d>
+- Development report: <https://github.com/jacovanc/Orc/issues/1#issuecomment-5575693984>
+- QA fresh Orb/thread: <https://ampcode.com/threads/T-01a07db9-7853-759c-8e74-ebfdb89e0911>
+- QA report: <https://github.com/jacovanc/Orc/issues/1#issuecomment-5575697936>
+
+Both thread records report `executorType: sandbox`, have distinct IDs, called only the three proof tools, and made no code, branch, pull request, label, or issue-state changes. The authenticated production state is captured in `.amp/in/artifacts/amp-production-human-review.png`.
