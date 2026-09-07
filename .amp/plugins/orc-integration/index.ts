@@ -210,10 +210,10 @@ export default async function (amp: PluginAPI) {
 			'Use workflow_read_issue, then workflow_post_test_comment, then workflow_complete.',
 			'Keep the report factual and explicitly describe this as an Orc integration test.',
 		].join(' '),
-		// The installed API documents plugin__* as the explicit selector that keeps
-		// plugin tools available to extended agents. This plugin defines only the
-		// three restricted tools above; no built-in or MCP tools are included.
-		tools: ['plugin__*'],
+		// Extended agents require `add` to union plugin tools into the resolved mode
+		// selection. An empty include removes every built-in/MCP tool first, leaving
+		// only this project's three restricted plugin tools.
+		tools: { include: [], add: ['plugin__*'] },
 		reasoningEffort: 'low',
 		features: [],
 		display: { label: 'Orc proof', color: '#f97316' },
