@@ -20,9 +20,12 @@ Create gitignored `.amp/runtime/orc-plugin.json` with mode `0600`:
 {
   "callbackUrl": "https://your-orc.example/api/integrations/amp",
   "launchSigningSecret": "generated Laravel-to-Amp secret",
-  "callbackSigningSecret": "different generated Amp-to-Laravel secret"
+  "callbackSigningSecret": "different generated Amp-to-Laravel secret",
+  "githubToken": "fine-grained token for approved proof repositories"
 }
 ```
+
+Use a least-privilege fine-grained GitHub token: read Issues metadata/content and write issue comments only for repositories explicitly approved for proof runs. The token remains in the plugin process and is never returned by a model-facing tool.
 
 Reload the project plugin from an Amp-managed Orb. Re-registering key `orc-stage-launch-v1` restores the same durable webhook. The plugin writes the capability URL to `.amp/runtime/launch-webhook-url` with mode `0600`; treat that URL like a password.
 

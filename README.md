@@ -37,7 +37,7 @@ The integration is disabled by default. It requires a database queue worker and 
 3. Configure the matching Laravel variables listed in `.env.example`, set `QUEUE_CONNECTION=database`, and run a worker for the `amp-launches` queue.
 4. Enable `AMP_INTEGRATION_ENABLED` only after both callback and launch directions are configured.
 
-Never commit, log, or show the secrets or webhook URL. Exact configuration, rotation, failure handling, and proof-agent boundaries are in [docs/amp-integration.md](docs/amp-integration.md).
+Never commit, log, or show the secrets, GitHub token, or webhook URL. Exact configuration, rotation, failure handling, and proof-agent boundaries are in [docs/amp-integration.md](docs/amp-integration.md).
 
 ## Local setup
 

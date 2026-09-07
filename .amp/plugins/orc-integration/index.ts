@@ -14,6 +14,7 @@ type RuntimeConfig = {
 	callbackUrl: string
 	launchSigningSecret: string
 	callbackSigningSecret: string
+	githubToken: string
 }
 
 type LaunchPayload = {
@@ -86,10 +87,10 @@ export default async function (amp: PluginAPI) {
 		inputSchema: { type: 'object', properties: {}, additionalProperties: false },
 		execute: async (_input, ctx) => {
 			const context = await activeContext(ctx.thread.id, config)
-			const issue = await githubRequest<GitHubIssue>(
+			const issue = await githubRequest<GitHubIssue>(config,
 				`/repos/${context.github_repository}/issues/${context.github_issue_number}`,
 			)
-			const comments = await githubRequest<GitHubComment[]>(
+			const comments = await githubRequest<GitHubComment[]>(config,
 				`/repos/${context.github_repository}/issues/${context.github_issue_number}/comments?per_page=100`,
 			)
 
@@ -129,7 +130,7 @@ export default async function (amp: PluginAPI) {
 		execute: async (input, ctx) => {
 			const context = await activeContext(ctx.thread.id, config)
 			const marker = `<!-- orc-stage-run:${context.stage_run_id} -->`
-			const existing = await findProofComment(context, marker)
+			const existing = await findProofComment(config, context, marker)
 			if (existing) {
 				context.report_url = existing.html_url
 				return `Existing idempotent test report: ${existing.html_url}`
@@ -155,7 +156,7 @@ export default async function (amp: PluginAPI) {
 			// Re-check immediately before the only external side effect. A cancellation
 			// during the preceding GitHub read must prevent publication.
 			await activeContext(ctx.thread.id, config)
-			const comment = await githubRequest<GitHubComment>(
+			const comment = await githubRequest<GitHubComment>(config,
 				`/repos/${context.github_repository}/issues/${context.github_issue_number}/comments`,
 				{ method: 'POST', body: JSON.stringify({ body }) },
 			)
@@ -188,7 +189,7 @@ export default async function (amp: PluginAPI) {
 			}
 
 			if (!context.report_url) {
-				const existing = await findProofComment(context, `<!-- orc-stage-run:${context.stage_run_id} -->`)
+				const existing = await findProofComment(config, context, `<!-- orc-stage-run:${context.stage_run_id} -->`)
 				context.report_url = existing?.html_url
 			}
 			if (!context.report_url) {
@@ -464,15 +465,14 @@ function parseLaunch(body: string): LaunchPayload {
 	return payload as LaunchPayload
 }
 
-async function findProofComment(context: LaunchPayload, marker: string) {
-	const comments = await githubRequest<GitHubComment[]>(
+async function findProofComment(config: RuntimeConfig, context: LaunchPayload, marker: string) {
+	const comments = await githubRequest<GitHubComment[]>(config,
 		`/repos/${context.github_repository}/issues/${context.github_issue_number}/comments?per_page=100`,
 	)
 	return comments.find((comment) => comment.body?.includes(marker))
 }
 
-async function githubRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-	const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
+async function githubRequest<T>(config: RuntimeConfig, path: string, init: RequestInit = {}): Promise<T> {
 	const response = await fetch(`https://api.github.com${path}`, {
 		...init,
 		headers: {
@@ -480,7 +480,7 @@ async function githubRequest<T>(path: string, init: RequestInit = {}): Promise<T
 			'content-type': 'application/json',
 			'user-agent': 'Orc-Amp-Integration',
 			'x-github-api-version': '2022-11-28',
-			...(token ? { authorization: `Bearer ${token}` } : {}),
+			authorization: `Bearer ${config.githubToken}`,
 			...init.headers,
 		},
 		signal: AbortSignal.timeout(10_000),
@@ -492,7 +492,7 @@ async function githubRequest<T>(path: string, init: RequestInit = {}): Promise<T
 function readRuntimeConfig(path: string): RuntimeConfig | null {
 	try {
 		const value = JSON.parse(readFileSync(path, 'utf8')) as Partial<RuntimeConfig>
-		if (!value.callbackUrl || !value.launchSigningSecret || !value.callbackSigningSecret) return null
+		if (!value.callbackUrl || !value.launchSigningSecret || !value.callbackSigningSecret || !value.githubToken) return null
 		return value as RuntimeConfig
 	} catch {
 		return null
