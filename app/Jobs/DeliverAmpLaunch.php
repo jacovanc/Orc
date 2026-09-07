@@ -1,0 +1,174 @@
+<?php
+
+namespace App\Jobs;
+
+use App\Domain\Workflow\AmpDeliveryStatus;
+use App\Domain\Workflow\AmpLaunchStatus;
+use App\Models\AmpLaunch;
+use App\Services\AmpLaunchPayload;
+use App\Services\AmpSignature;
+use App\Services\WorkflowEngine;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Throwable;
+
+class DeliverAmpLaunch implements ShouldBeUnique, ShouldQueue
+{
+    use Queueable;
+
+    public int $tries = 4;
+
+    public int $timeout = 20;
+
+    public bool $failOnTimeout = true;
+
+    public function __construct(public readonly int $ampLaunchId)
+    {
+        $this->onQueue('amp-launches');
+    }
+
+    public function backoff(): array
+    {
+        return [5, 15, 60];
+    }
+
+    public function uniqueId(): string
+    {
+        return (string) $this->ampLaunchId;
+    }
+
+    public function handle(
+        AmpLaunchPayload $payloadFactory,
+        AmpSignature $signature,
+        WorkflowEngine $engine,
+    ): void {
+        $launch = DB::transaction(function () {
+            $locked = AmpLaunch::query()->lockForUpdate()->findOrFail($this->ampLaunchId);
+
+            if (in_array($locked->delivery_status, [
+                AmpDeliveryStatus::Delivered,
+                AmpDeliveryStatus::Failed,
+                AmpDeliveryStatus::Ambiguous,
+            ], true)) {
+                return null;
+            }
+
+            if ($locked->launch_status !== AmpLaunchStatus::Pending) {
+                $locked->forceFill([
+                    'delivery_status' => AmpDeliveryStatus::Delivered,
+                    'last_error_code' => null,
+                    'last_error_message' => null,
+                ])->save();
+
+                return null;
+            }
+
+            $locked->forceFill([
+                'delivery_status' => AmpDeliveryStatus::Delivering,
+                'delivery_attempts' => $locked->delivery_attempts + 1,
+            ])->save();
+
+            return $locked->fresh();
+        }, 3);
+
+        if (! $launch) {
+            return;
+        }
+
+        $url = (string) config('services.amp.launch_webhook_url');
+        $secret = (string) config('services.amp.launch_signing_secret');
+        if ($url === '' || $secret === '') {
+            $engine->failAmpLaunchDelivery($launch, 'configuration', 'Amp launch configuration is incomplete.');
+
+            return;
+        }
+
+        $payload = $payloadFactory->make($launch);
+        $body = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        $timestamp = now()->getTimestamp();
+
+        $launch->forceFill(['payload_hash' => hash('sha256', $body)])->save();
+
+        try {
+            $response = Http::asJson()
+                ->acceptJson()
+                ->connectTimeout(3)
+                ->timeout(10)
+                ->withHeaders([
+                    'Idempotency-Key' => $launch->idempotency_key,
+                    'X-Orc-Event-Id' => $launch->event_id,
+                    'X-Orc-Timestamp' => (string) $timestamp,
+                    'X-Orc-Signature' => $signature->sign($body, $launch->event_id, $timestamp, $secret),
+                ])
+                ->withBody($body, 'application/json')
+                ->post($url);
+        } catch (ConnectionException $exception) {
+            $this->recordTransientFailure($launch, 'network', $exception->getMessage());
+
+            throw $exception;
+        }
+
+        if ($response->successful()) {
+            $this->markDelivered($launch, $response->status());
+
+            return;
+        }
+
+        if ($response->status() === 408 || $response->status() === 429 || $response->serverError()) {
+            $this->recordTransientFailure($launch, 'http_'.$response->status(), 'Retryable Amp webhook response.');
+            throw new RequestException($response);
+        }
+
+        $engine->failAmpLaunchDelivery(
+            $launch,
+            'http_'.$response->status(),
+            'Amp webhook permanently rejected the launch request.',
+            $response->status(),
+        );
+    }
+
+    public function failed(?Throwable $exception): void
+    {
+        $launch = AmpLaunch::query()->find($this->ampLaunchId);
+        if (! $launch) {
+            return;
+        }
+
+        app(WorkflowEngine::class)->markAmpLaunchAmbiguous(
+            $launch,
+            'retry_exhausted',
+            $exception?->getMessage() ?: 'Amp launch delivery exhausted its retry budget.',
+        );
+    }
+
+    private function markDelivered(AmpLaunch $launch, int $status): void
+    {
+        DB::transaction(function () use ($launch, $status) {
+            $locked = AmpLaunch::query()->lockForUpdate()->findOrFail($launch->getKey());
+            if ($locked->delivery_status === AmpDeliveryStatus::Failed) {
+                return;
+            }
+
+            $locked->forceFill([
+                'delivery_status' => AmpDeliveryStatus::Delivered,
+                'last_http_status' => $status,
+                'last_error_code' => null,
+                'last_error_message' => null,
+            ])->save();
+        }, 3);
+    }
+
+    private function recordTransientFailure(AmpLaunch $launch, string $code, string $message): void
+    {
+        AmpLaunch::query()->whereKey($launch->getKey())->update([
+            'last_error_code' => $code,
+            'last_error_message' => mb_substr($message, 0, 1000),
+            'updated_at' => now(),
+        ]);
+    }
+}

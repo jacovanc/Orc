@@ -8,4 +8,5 @@ enum StageRunStatus: string
     case Waiting = 'waiting';
     case Completed = 'completed';
     case Cancelled = 'cancelled';
+    case Failed = 'failed';
 }

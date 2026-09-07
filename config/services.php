@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    'amp' => [
+        'enabled' => env('AMP_INTEGRATION_ENABLED', false),
+        'launch_webhook_url' => env('AMP_LAUNCH_WEBHOOK_URL'),
+        'launch_signing_secret' => env('AMP_LAUNCH_SIGNING_SECRET'),
+        'callback_signing_secret' => env('AMP_CALLBACK_SIGNING_SECRET'),
+        'signature_tolerance_seconds' => (int) env('AMP_SIGNATURE_TOLERANCE_SECONDS', 300),
+    ],
+
 ];

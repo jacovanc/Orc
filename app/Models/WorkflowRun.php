@@ -21,6 +21,7 @@ class WorkflowRun extends Model
         'started_at',
         'completed_at',
         'cancelled_at',
+        'failed_at',
     ];
 
     protected function casts(): array
@@ -30,6 +31,7 @@ class WorkflowRun extends Model
             'started_at' => 'datetime',
             'completed_at' => 'datetime',
             'cancelled_at' => 'datetime',
+            'failed_at' => 'datetime',
         ];
     }
 

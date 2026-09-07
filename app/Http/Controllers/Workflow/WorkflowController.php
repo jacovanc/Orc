@@ -78,7 +78,9 @@ class WorkflowController extends Controller
             'definition.transitions.toStage',
             'currentStage.outgoingTransitions',
             'activeStageRun.stage.outgoingTransitions',
+            'activeStageRun.ampLaunch',
             'stageRuns.stage',
+            'stageRuns.ampLaunch',
             'events.stageRun.stage',
         ]);
 

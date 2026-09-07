@@ -6,6 +6,7 @@ use App\Domain\Workflow\StageRunStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class StageRun extends Model
 {
@@ -44,5 +45,10 @@ class StageRun extends Model
     public function events(): HasMany
     {
         return $this->hasMany(WorkflowEvent::class);
+    }
+
+    public function ampLaunch(): HasOne
+    {
+        return $this->hasOne(AmpLaunch::class);
     }
 }

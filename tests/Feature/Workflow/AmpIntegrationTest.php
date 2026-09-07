@@ -1,0 +1,355 @@
+<?php
+
+namespace Tests\Feature\Workflow;
+
+use App\Domain\Workflow\AmpDeliveryStatus;
+use App\Domain\Workflow\AmpIntegrationEventStatus;
+use App\Domain\Workflow\AmpLaunchStatus;
+use App\Domain\Workflow\StageRunStatus;
+use App\Domain\Workflow\WorkflowStatus;
+use App\Jobs\DeliverAmpLaunch;
+use App\Models\AmpIntegrationEvent;
+use App\Models\AmpLaunch;
+use App\Models\User;
+use App\Models\WorkflowDefinition;
+use App\Models\WorkflowRun;
+use App\Services\AmpLaunchPayload;
+use App\Services\AmpSignature;
+use App\Services\WorkflowEngine;
+use Database\Seeders\DevelopmentWorkflowSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+
+class AmpIntegrationTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private WorkflowEngine $engine;
+
+    private User $user;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->seed(DevelopmentWorkflowSeeder::class);
+        $this->engine = app(WorkflowEngine::class);
+        $this->user = User::factory()->create();
+        config([
+            'services.amp.enabled' => true,
+            'services.amp.launch_webhook_url' => 'https://amp.test/webhook',
+            'services.amp.launch_signing_secret' => 'launch-test-secret',
+            'services.amp.callback_signing_secret' => 'callback-test-secret',
+            'services.amp.signature_tolerance_seconds' => 300,
+        ]);
+        Queue::fake();
+    }
+
+    public function test_agent_attempt_queues_one_durable_launch_with_stable_keys(): void
+    {
+        $run = $this->startRun();
+        $launch = $run->activeStageRun->ampLaunch;
+
+        $this->assertNotNull($launch);
+        $this->assertTrue(Str::isUuid($launch->event_id));
+        $this->assertTrue(Str::isUuid($launch->idempotency_key));
+        $this->assertSame(AmpDeliveryStatus::Pending, $launch->delivery_status);
+        $this->assertSame(AmpLaunchStatus::Pending, $launch->launch_status);
+        Queue::assertPushed(DeliverAmpLaunch::class, 1);
+        $this->assertSame(1, $run->events()->where('type', 'stage.launch_queued')->count());
+    }
+
+    public function test_launch_delivery_retry_reuses_exact_body_event_and_idempotency_keys(): void
+    {
+        $launch = $this->startRun()->activeStageRun->ampLaunch;
+        $attempt = 0;
+        $requests = [];
+        Http::fake(function ($request) use (&$attempt, &$requests) {
+            $requests[] = $request;
+
+            if (++$attempt === 1) {
+                throw new ConnectionException('timeout');
+            }
+
+            return Http::response('', 202);
+        });
+
+        $job = new DeliverAmpLaunch($launch->id);
+        try {
+            $job->handle(app(AmpLaunchPayload::class), app(AmpSignature::class), $this->engine);
+            $this->fail('The first network attempt should be retried by the queue.');
+        } catch (ConnectionException) {
+            // Expected transient delivery failure.
+        }
+        $job->handle(app(AmpLaunchPayload::class), app(AmpSignature::class), $this->engine);
+
+        $this->assertCount(2, $requests);
+        $this->assertSame($requests[0]->body(), $requests[1]->body());
+        $this->assertSame($launch->event_id, $requests[0]->header('X-Orc-Event-Id')[0]);
+        $this->assertSame($launch->idempotency_key, $requests[0]->header('Idempotency-Key')[0]);
+        $this->assertSame(
+            $requests[0]->header('Idempotency-Key')[0],
+            $requests[1]->header('Idempotency-Key')[0],
+        );
+        $this->assertSame(AmpDeliveryStatus::Delivered, $launch->fresh()->delivery_status);
+        $this->assertSame(2, $launch->fresh()->delivery_attempts);
+    }
+
+    public function test_signed_callback_middleware_rejects_invalid_and_expired_signatures(): void
+    {
+        $launch = $this->startRun()->activeStageRun->ampLaunch;
+        $payload = $this->payload($launch, 'launch.claim');
+
+        $this->postRawCallback($payload, signature: 'sha256=invalid')->assertUnauthorized();
+        $this->postRawCallback($payload, timestamp: now()->subMinutes(10)->timestamp)->assertUnauthorized();
+
+        $this->assertDatabaseCount('amp_integration_events', 0);
+        $this->assertSame(AmpLaunchStatus::Pending, $launch->fresh()->launch_status);
+    }
+
+    public function test_persistent_claim_and_callback_event_dedup_prevent_duplicate_launches(): void
+    {
+        $launch = $this->startRun()->activeStageRun->ampLaunch;
+        $firstPayload = $this->payload($launch, 'launch.claim');
+
+        $first = $this->postRawCallback($firstPayload)->assertOk()->json();
+        $sameEvent = $this->postRawCallback($firstPayload)->assertOk()->json();
+        $secondEvent = $this->postRawCallback($this->payload($launch, 'launch.claim'))->assertOk()->json();
+
+        $this->assertTrue($first['launch']);
+        $this->assertSame($first, $sameEvent);
+        $this->assertFalse($secondEvent['launch']);
+        $this->assertSame('duplicate_claim', $secondEvent['disposition']);
+        $this->assertDatabaseCount('amp_integration_events', 2);
+        $this->assertSame(1, $launch->stageRun->workflowRun->events()->where('type', 'stage.launch_claimed')->count());
+    }
+
+    public function test_completion_may_arrive_before_launch_http_response_and_starts_fresh_qa_launch(): void
+    {
+        $run = $this->startRun();
+        $development = $run->activeStageRun;
+        $launch = $development->ampLaunch;
+        $launch->update(['delivery_status' => AmpDeliveryStatus::Delivering]);
+
+        $this->ampCallback($launch, 'launch.claim');
+        $this->ampCallback($launch, 'stage.completed', [
+            'thread_id' => $this->threadId(1),
+            'outcome' => 'success',
+            'github_report_url' => 'https://github.com/acme/widgets/issues/42#issuecomment-101',
+        ]);
+
+        $run->refresh()->load(['currentStage', 'activeStageRun.ampLaunch']);
+        $this->assertSame('qa', $run->currentStage->key);
+        $this->assertSame($this->threadId(1), $development->fresh()->amp_thread_id);
+        $this->assertSame(AmpLaunchStatus::Completed, $launch->fresh()->launch_status);
+        $this->assertNotSame($launch->idempotency_key, $run->activeStageRun->ampLaunch->idempotency_key);
+        $this->assertNotSame($launch->event_id, $run->activeStageRun->ampLaunch->event_id);
+        Queue::assertPushed(DeliverAmpLaunch::class, 2);
+
+        Http::fake();
+        (new DeliverAmpLaunch($launch->id))->handle(
+            app(AmpLaunchPayload::class),
+            app(AmpSignature::class),
+            $this->engine,
+        );
+        Http::assertNothingSent();
+        $this->assertSame(AmpDeliveryStatus::Delivered, $launch->fresh()->delivery_status);
+    }
+
+    public function test_amp_development_and_qa_callbacks_reach_human_review_with_distinct_threads(): void
+    {
+        $run = $this->startRun();
+        $developmentLaunch = $run->activeStageRun->ampLaunch;
+        $this->ampCallback($developmentLaunch, 'launch.claim');
+        $this->ampCallback($developmentLaunch, 'launch.acknowledged', ['thread_id' => $this->threadId(1)]);
+        $this->ampCallback($developmentLaunch, 'stage.completed', [
+            'thread_id' => $this->threadId(1),
+            'outcome' => 'success',
+            'github_report_url' => 'https://github.com/acme/widgets/issues/42#issuecomment-101',
+        ]);
+
+        $run->refresh()->load('activeStageRun.ampLaunch');
+        $qaLaunch = $run->activeStageRun->ampLaunch;
+        $this->ampCallback($qaLaunch, 'launch.claim');
+        $this->ampCallback($qaLaunch, 'launch.acknowledged', ['thread_id' => $this->threadId(2)]);
+        $result = $this->ampCallback($qaLaunch, 'stage.completed', [
+            'thread_id' => $this->threadId(2),
+            'outcome' => 'pass',
+            'github_report_url' => 'https://github.com/acme/widgets/issues/42#issuecomment-102',
+        ]);
+
+        $run->refresh()->load(['currentStage', 'activeStageRun']);
+        $this->assertTrue($result['accepted']);
+        $this->assertSame('human_review', $run->currentStage->key);
+        $this->assertSame(StageRunStatus::Waiting, $run->activeStageRun->status);
+        $this->assertSame(
+            [$this->threadId(1), $this->threadId(2)],
+            $run->stageRuns()->whereNotNull('amp_thread_id')->pluck('amp_thread_id')->all(),
+        );
+        $this->assertSame(2, $run->events()->where('type', 'stage.amp_launched')->count());
+    }
+
+    public function test_foreign_thread_conflicting_and_reused_event_callbacks_are_rejected(): void
+    {
+        $run = $this->startRun();
+        $launch = $run->activeStageRun->ampLaunch;
+        $this->ampCallback($launch, 'launch.claim');
+        $this->ampCallback($launch, 'launch.acknowledged', ['thread_id' => $this->threadId(1)]);
+
+        $foreign = $this->ampCallback($launch, 'stage.completed', [
+            'thread_id' => $this->threadId(2),
+            'outcome' => 'success',
+            'github_report_url' => 'https://github.com/acme/widgets/issues/42#issuecomment-101',
+        ]);
+        $this->assertFalse($foreign['accepted']);
+        $this->assertStringContainsString('different Amp thread', $foreign['reason']);
+        $this->assertSame(StageRunStatus::Running, $run->activeStageRun->fresh()->status);
+
+        $payload = $this->payload($launch, 'launch.acknowledged', ['thread_id' => $this->threadId(1)]);
+        $this->postRawCallback($payload)->assertOk();
+        $payload['thread_id'] = $this->threadId(3);
+        $this->postRawCallback($payload)->assertConflict();
+    }
+
+    public function test_cancelled_and_stale_attempt_callbacks_are_persistently_rejected(): void
+    {
+        $run = $this->startRun();
+        $launch = $run->activeStageRun->ampLaunch;
+        $this->ampCallback($launch, 'launch.claim');
+        $this->engine->cancel($run, $this->user);
+
+        $result = $this->ampCallback($launch, 'stage.completed', [
+            'thread_id' => $this->threadId(1),
+            'outcome' => 'success',
+            'github_report_url' => 'https://github.com/acme/widgets/issues/42#issuecomment-101',
+        ]);
+
+        $this->assertFalse($result['accepted']);
+        $this->assertStringContainsString('failed', $result['reason']);
+        $this->assertSame(WorkflowStatus::Cancelled, $run->fresh()->status);
+        $this->assertSame(AmpIntegrationEventStatus::Rejected, AmpIntegrationEvent::query()->latest('id')->first()->status);
+    }
+
+    public function test_agent_end_failure_closes_attempt_and_workflow_without_transition(): void
+    {
+        $run = $this->startRun();
+        $launch = $run->activeStageRun->ampLaunch;
+        $this->ampCallback($launch, 'launch.claim');
+
+        $result = $this->ampCallback($launch, 'stage.failed', [
+            'thread_id' => $this->threadId(1),
+            'reason' => 'Guarded agent.end exhausted its corrective turn.',
+        ]);
+
+        $this->assertTrue($result['accepted']);
+        $this->assertSame(WorkflowStatus::Failed, $run->fresh()->status);
+        $this->assertSame(StageRunStatus::Failed, $run->activeStageRun->fresh()->status);
+        $this->assertNull($run->fresh()->activeStageRun);
+        $this->assertSame(AmpLaunchStatus::Failed, $launch->fresh()->launch_status);
+    }
+
+    public function test_permanent_delivery_failure_and_ambiguous_network_outcome_are_distinct(): void
+    {
+        $failedRun = $this->startRun();
+        $failedLaunch = $failedRun->activeStageRun->ampLaunch;
+        Http::fake(['*' => Http::response('no', 401)]);
+        (new DeliverAmpLaunch($failedLaunch->id))->handle(
+            app(AmpLaunchPayload::class),
+            app(AmpSignature::class),
+            $this->engine,
+        );
+
+        $this->assertSame(AmpDeliveryStatus::Failed, $failedLaunch->fresh()->delivery_status);
+        $this->assertSame(AmpLaunchStatus::Failed, $failedLaunch->fresh()->launch_status);
+        $this->assertSame(WorkflowStatus::Failed, $failedRun->fresh()->status);
+
+        $ambiguousRun = $this->startRun();
+        $ambiguousLaunch = $ambiguousRun->activeStageRun->ampLaunch;
+        (new DeliverAmpLaunch($ambiguousLaunch->id))->failed(new ConnectionException('timed out'));
+
+        $this->assertSame(AmpDeliveryStatus::Ambiguous, $ambiguousLaunch->fresh()->delivery_status);
+        $this->assertSame(AmpLaunchStatus::Ambiguous, $ambiguousLaunch->fresh()->launch_status);
+        $this->assertSame(WorkflowStatus::Running, $ambiguousRun->fresh()->status);
+
+        Http::fake();
+        (new DeliverAmpLaunch($ambiguousLaunch->id))->handle(
+            app(AmpLaunchPayload::class),
+            app(AmpSignature::class),
+            $this->engine,
+        );
+        Http::assertNothingSent();
+    }
+
+    private function startRun(): WorkflowRun
+    {
+        return $this->engine->start(
+            $this->user,
+            WorkflowDefinition::query()->sole(),
+            'acme/widgets',
+            42,
+            'https://github.com/acme/widgets/issues/42',
+        );
+    }
+
+    private function ampCallback(AmpLaunch $launch, string $type, array $extra = []): array
+    {
+        $payload = $this->payload($launch, $type, $extra);
+        $body = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+
+        return $this->engine->handleAmpCallback($payload, hash('sha256', $body));
+    }
+
+    private function payload(AmpLaunch $launch, string $type, array $extra = []): array
+    {
+        return [
+            'schema_version' => 1,
+            'event_id' => (string) Str::uuid(),
+            'type' => $type,
+            'occurred_at' => now()->toISOString(),
+            'idempotency_key' => $launch->idempotency_key,
+            'launch_event_id' => $launch->event_id,
+            'stage_run_id' => $launch->stage_run_id,
+            ...$extra,
+        ];
+    }
+
+    private function postRawCallback(
+        array $payload,
+        ?int $timestamp = null,
+        ?string $signature = null,
+    ) {
+        $body = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        $timestamp ??= now()->timestamp;
+        $signature ??= app(AmpSignature::class)->sign(
+            $body,
+            $payload['event_id'],
+            $timestamp,
+            config('services.amp.callback_signing_secret'),
+        );
+
+        return $this->call(
+            'POST',
+            '/api/integrations/amp/callback',
+            [],
+            [],
+            [],
+            [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_ACCEPT' => 'application/json',
+                'HTTP_X_ORC_EVENT_ID' => $payload['event_id'],
+                'HTTP_X_ORC_TIMESTAMP' => (string) $timestamp,
+                'HTTP_X_ORC_SIGNATURE' => $signature,
+            ],
+            $body,
+        );
+    }
+
+    private function threadId(int $number): string
+    {
+        return 'T-'.str_pad((string) $number, 36, '0', STR_PAD_LEFT);
+    }
+}

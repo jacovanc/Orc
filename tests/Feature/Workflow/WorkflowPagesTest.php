@@ -8,6 +8,7 @@ use App\Models\WorkflowRun;
 use App\Services\WorkflowEngine;
 use Database\Seeders\DevelopmentWorkflowSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class WorkflowPagesTest extends TestCase
@@ -119,6 +120,38 @@ class WorkflowPagesTest extends TestCase
             ->assertSessionHasErrors('github_feedback_url');
 
         $this->assertSame('human_review', $run->fresh('currentStage')->currentStage->key);
+    }
+
+    public function test_amp_enabled_page_shows_dispatch_thread_and_report_without_simulation_controls(): void
+    {
+        config(['services.amp.enabled' => true]);
+        Queue::fake();
+        $run = $this->startRun();
+        $attempt = $run->activeStageRun;
+        $threadId = 'T-00000000-0000-0000-0000-000000000001';
+        $reportUrl = 'https://github.com/acme/widgets/issues/18#issuecomment-101';
+        $attempt->update(['amp_thread_id' => $threadId]);
+        $run->events()->create([
+            'stage_run_id' => $attempt->id,
+            'type' => 'stage.completed',
+            'actor_type' => 'amp_agent',
+            'metadata' => [
+                'amp_thread_id' => $threadId,
+                'github_report_url' => $reportUrl,
+            ],
+            'happened_at' => now(),
+        ]);
+
+        $this->actingAs($this->user)
+            ->get(route('workflows.show', $run))
+            ->assertOk()
+            ->assertSee('Amp dispatch')
+            ->assertSee('Open Amp thread')
+            ->assertSee("https://ampcode.com/threads/{$threadId}", false)
+            ->assertSee($reportUrl, false)
+            ->assertSee('Report')
+            ->assertDontSee('Simulation only.')
+            ->assertDontSee('Record a simulated outcome');
     }
 
     public function test_other_users_cannot_view_or_mutate_a_run(): void
