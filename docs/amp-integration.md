@@ -27,6 +27,8 @@ Create gitignored `.amp/runtime/orc-plugin.json` with mode `0600`:
 
 Use a least-privilege fine-grained GitHub token: read Issues metadata/content and write issue comments only for repositories explicitly approved for proof runs. The token remains in the plugin process and is never returned by a model-facing tool.
 
+Fresh agent Orbs cannot inherit the gitignored file. Store the same values as Amp project-scoped configuration so the plugin can initialize there: `ORC_CALLBACK_URL` as an environment variable, plus secret values `ORC_LAUNCH_SIGNING_SECRET`, `ORC_CALLBACK_SIGNING_SECRET`, and `ORC_GITHUB_TOKEN`. Values are injected into Orb processes but never returned by `amp secrets list` or exposed to the proof model. The local owner-only file remains the source for the webhook-hosting Orb.
+
 Reload the project plugin from an Amp-managed Orb. Re-registering key `orc-stage-launch-v1` restores the same durable webhook. The plugin writes the capability URL to `.amp/runtime/launch-webhook-url` with mode `0600`; treat that URL like a password.
 
 Configure Laravel without exposing values:

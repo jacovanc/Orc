@@ -297,6 +297,9 @@ async function handleLaunch(
 	payload.thread_id = thread.id
 	contexts.set(thread.id, payload)
 	launches.set(payload.idempotency_key, payload)
+	// A fresh Orb loads this project plugin and its project-scoped secrets before
+	// the first turn. Give that runtime a bounded readiness window.
+	await sleep(5_000, ctx.signal)
 	await acknowledgeAndPrompt(config, payload, amp, ctx.signal)
 }
 
@@ -556,13 +559,22 @@ async function githubRequest<T>(config: RuntimeConfig, path: string, init: Reque
 }
 
 function readRuntimeConfig(path: string): RuntimeConfig | null {
+	let file: Partial<RuntimeConfig> = {}
 	try {
-		const value = JSON.parse(readFileSync(path, 'utf8')) as Partial<RuntimeConfig>
-		if (!value.callbackUrl || !value.launchSigningSecret || !value.callbackSigningSecret || !value.githubToken) return null
-		return value as RuntimeConfig
+		file = JSON.parse(readFileSync(path, 'utf8')) as Partial<RuntimeConfig>
 	} catch {
-		return null
+		// Fresh Orbs receive the same values through Amp project-scoped secrets.
 	}
+
+	const value: Partial<RuntimeConfig> = {
+		callbackUrl: file.callbackUrl || process.env.ORC_CALLBACK_URL,
+		launchSigningSecret: file.launchSigningSecret || process.env.ORC_LAUNCH_SIGNING_SECRET,
+		callbackSigningSecret: file.callbackSigningSecret || process.env.ORC_CALLBACK_SIGNING_SECRET,
+		githubToken: file.githubToken || process.env.ORC_GITHUB_TOKEN,
+	}
+	if (!value.callbackUrl || !value.launchSigningSecret || !value.callbackSigningSecret || !value.githubToken) return null
+
+	return value as RuntimeConfig
 }
 
 function ctxHeader(event: WebhookEvent, name: string): string {
