@@ -210,7 +210,11 @@ export default async function (amp: PluginAPI) {
 			'Use workflow_read_issue, then workflow_post_test_comment, then workflow_complete.',
 			'Keep the report factual and explicitly describe this as an Orc integration test.',
 		].join(' '),
-		tools: ['workflow_read_issue', 'workflow_post_test_comment', 'workflow_complete'],
+		tools: [
+			'plugin__orc-integration__workflow_read_issue',
+			'plugin__orc-integration__workflow_post_test_comment',
+			'plugin__orc-integration__workflow_complete',
+		],
 		reasoningEffort: 'low',
 		features: [],
 		display: { label: 'Orc proof', color: '#f97316' },
