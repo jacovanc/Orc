@@ -84,8 +84,8 @@
                                         <p class="text-xs leading-5 text-zinc-600">Stable launch key <span class="font-mono text-zinc-500">{{ $activeLaunch?->idempotency_key ? str($activeLaunch->idempotency_key)->limit(18) : 'preparing' }}</span></p>
                                     </div>
                                     <div class="flex flex-wrap gap-2">
-                                        <span class="status-pill status-{{ $activeLaunch?->delivery_status?->value ?? 'waiting' }}">{{ $activeLaunch?->delivery_status?->value ?? 'preparing' }}</span>
-                                        <span class="status-pill status-{{ $activeLaunch?->launch_status?->value ?? 'waiting' }}">{{ $activeLaunch?->launch_status?->value ?? 'pending' }}</span>
+                                        <span class="status-pill status-{{ $activeLaunch?->delivery_status?->value ?? 'waiting' }}">Delivery {{ $activeLaunch?->delivery_status?->value ?? 'preparing' }}</span>
+                                        <span class="status-pill status-{{ $activeLaunch?->launch_status?->value ?? 'waiting' }}">Launch {{ $activeLaunch?->launch_status?->value ?? 'pending' }}</span>
                                     </div>
                                 </div>
                                 @if ($active->amp_thread_id)
@@ -207,7 +207,7 @@
                     <li class="relative border-l border-white/[0.08] pb-6 pl-5 last:border-transparent last:pb-0">
                         <span class="absolute -left-1 top-1 h-2 w-2 rounded-full border-2 border-ink-900 {{ $eventDotClass }}"></span>
                         <div class="flex items-start justify-between gap-3">
-                            <p class="text-sm font-medium text-zinc-300">{{ str($event->type)->replace('.', ' ')->title() }}</p>
+                            <p class="text-sm font-medium text-zinc-300">{{ str($event->type)->replace(['.', '_'], ' ')->title() }}</p>
                             <time class="shrink-0 font-mono text-[9px] text-zinc-700">{{ $event->happened_at->format('H:i:s') }}</time>
                         </div>
                         @if ($event->metadata)

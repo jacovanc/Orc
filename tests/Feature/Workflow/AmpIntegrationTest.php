@@ -5,6 +5,7 @@ namespace Tests\Feature\Workflow;
 use App\Domain\Workflow\AmpDeliveryStatus;
 use App\Domain\Workflow\AmpIntegrationEventStatus;
 use App\Domain\Workflow\AmpLaunchStatus;
+use App\Domain\Workflow\Exceptions\WorkflowConflict;
 use App\Domain\Workflow\StageRunStatus;
 use App\Domain\Workflow\WorkflowStatus;
 use App\Jobs\DeliverAmpLaunch;
@@ -61,6 +62,16 @@ class AmpIntegrationTest extends TestCase
         $this->assertSame(AmpLaunchStatus::Pending, $launch->launch_status);
         Queue::assertPushed(DeliverAmpLaunch::class, 1);
         $this->assertSame(1, $run->events()->where('type', 'stage.launch_queued')->count());
+    }
+
+    public function test_simulation_cannot_bypass_an_enabled_amp_integration(): void
+    {
+        $run = $this->startRun();
+
+        $this->expectException(WorkflowConflict::class);
+        $this->expectExceptionMessage('simulation is disabled');
+
+        $this->engine->simulateAgentCompletion($run, $run->activeStageRun, 'success', $this->user);
     }
 
     public function test_launch_delivery_retry_reuses_exact_body_event_and_idempotency_keys(): void
@@ -213,6 +224,23 @@ class AmpIntegrationTest extends TestCase
         $this->postRawCallback($payload)->assertOk();
         $payload['thread_id'] = $this->threadId(3);
         $this->postRawCallback($payload)->assertConflict();
+    }
+
+    public function test_completion_rejects_reports_from_another_github_issue(): void
+    {
+        $run = $this->startRun();
+        $launch = $run->activeStageRun->ampLaunch;
+        $this->ampCallback($launch, 'launch.claim');
+
+        $result = $this->ampCallback($launch, 'stage.completed', [
+            'thread_id' => $this->threadId(1),
+            'outcome' => 'success',
+            'github_report_url' => 'https://github.com/acme/widgets/issues/420#issuecomment-101',
+        ]);
+
+        $this->assertFalse($result['accepted']);
+        $this->assertStringContainsString('this workflow issue', $result['reason']);
+        $this->assertSame(StageRunStatus::Running, $run->activeStageRun->fresh()->status);
     }
 
     public function test_cancelled_and_stale_attempt_callbacks_are_persistently_rejected(): void

@@ -37,7 +37,7 @@ One execution of a frozen definition for a GitHub repository and issue. It store
 
 ### StageRun
 
-An immutable numbered attempt at a stage within a workflow run. An attempt has status/outcome/timestamps and nullable Amp thread/event identifiers reserved for future integration. Historical attempts are never overwritten or deleted. Only one attempt for a workflow may be active at a time; attempt numbers increase monotonically across the whole workflow run, including loops.
+An immutable numbered attempt at a stage within a workflow run. An attempt has status/outcome/timestamps and nullable Amp thread/event identifiers populated by the Milestones 4–5 adapter. Historical attempts are never overwritten or deleted. Only one attempt for a workflow may be active at a time; attempt numbers increase monotonically across the whole workflow run, including loops.
 
 ### WorkflowEvent
 
@@ -64,7 +64,7 @@ Human Review (human) --approve--------> Done (terminal)
 7. Attempt numbers are allocated under the run lock from the current (and therefore highest) attempt, so loops retain a monotonically ordered history.
 8. Cancelled, completed, and failed workflows cannot transition. Cancellation is idempotent and closes the current active attempt.
 9. Human actions are accepted only for the current active human attempt and only when permitted by the definition. `request_changes` requires a valid GitHub URL proving feedback was published; Orc records only that URL in the event metadata.
-10. Agent simulation is available only for agent attempts and is visibly marked as simulation in both the UI and event stream.
+10. Agent simulation is available only when Amp integration is disabled and is visibly marked as simulation in both the UI and event stream.
 
 ## Service and HTTP shape
 

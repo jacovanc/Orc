@@ -99,6 +99,10 @@ class WorkflowEngine
         string $outcome,
         User $actor,
     ): WorkflowRun {
+        if (config('services.amp.enabled')) {
+            throw new WorkflowConflict('Agent simulation is disabled while the Amp integration is enabled.');
+        }
+
         return $this->completeAttempt(
             $run,
             $attempt,
@@ -755,9 +759,9 @@ class WorkflowEngine
             throw new WorkflowConflict('Amp must publish its stage report on GitHub before completing.');
         }
 
-        $path = strtolower((string) parse_url($reportUrl, PHP_URL_PATH));
+        $path = strtolower(rtrim((string) parse_url($reportUrl, PHP_URL_PATH), '/'));
         $expectedPrefix = strtolower('/'.$run->github_repository.'/issues/'.$run->github_issue_number);
-        if (! str_starts_with($path, $expectedPrefix)) {
+        if ($path !== $expectedPrefix) {
             throw new WorkflowConflict('The Amp report URL must belong to this workflow issue.');
         }
     }
