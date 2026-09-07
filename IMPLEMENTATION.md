@@ -40,6 +40,7 @@ Milestones 1–5: authenticated Laravel application, versioned workflow domain, 
 - Real production proof links: Development report <https://github.com/jacovanc/Orc/issues/1#issuecomment-5575693984> and QA report <https://github.com/jacovanc/Orc/issues/1#issuecomment-5575697936>. Both associated Amp threads used exactly three workflow tools and completed with the expected outcomes.
 - Real authenticated production screenshot `.amp/in/artifacts/amp-production-human-review.png`: visually inspected **PASS**; it shows `RUN-0015`, completed Development/QA attempts with thread and report links, waiting Human Review actions, no visible secrets, and no rendering defects.
 - Laravel Cloud deployment `depl-a2b0ead3-da4a-4a12-9e4d-b82fb1a5c500`: **`deployment.succeeded`**, source commit `ff5732952ed511ffa2fced9d4fa00a7e008782cd`.
+- Final Laravel Cloud deployment `depl-a2b11f89-b89b-47f7-91f1-8d35091be5a0`: **`deployment.succeeded`**, source commit `daa5b06aef4b56e2f37c9b54375b09d984bf2e72` containing the live-proven controller topology and production screenshot.
 - Laravel Cloud background process `process-a2b0eb69-ac71-4ef1-806e-93a70c442d92`: one database worker on queue `amp-launches`, four tries, bounded backoff, and a 30-second worker timeout.
 
 ## Deployment
@@ -53,4 +54,4 @@ Production is live at <https://orc-production-trttyo.laravel.cloud/>.
 - Environment variables include a Laravel Cloud-managed `APP_KEY`, production mode with debug disabled, the canonical application URL, and stderr logging. Secret values were never printed or committed.
 - Build uses optimized production Composer dependencies and compiled Vite assets. Deploy runs `php artisan migrate --force && php artisan db:seed --force`.
 - Integration variables and independent directional secrets are configured without exposing their values. `AMP_INTEGRATION_ENABLED` is active; the deployed database queue worker delivers to the durable controller webhook.
-- The deployed Laravel backend is commit `290bb3a9106c9898c9468443ab93e83fed3ed0bd`; later commits through the final Milestones 4–5 handoff update plugin behavior and documentation without changing the deployed PHP/runtime assets.
+- The deployed Laravel source is commit `daa5b06aef4b56e2f37c9b54375b09d984bf2e72`; the following handoff commit updates only this deployment record.
