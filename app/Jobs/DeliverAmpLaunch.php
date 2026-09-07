@@ -59,13 +59,19 @@ class DeliverAmpLaunch implements ShouldBeUnique, ShouldQueue
             }
 
             if ($locked->launch_status !== AmpLaunchStatus::Pending) {
-                $locked->forceFill([
-                    'delivery_status' => AmpDeliveryStatus::Delivered,
-                    'last_error_code' => null,
-                    'last_error_message' => null,
-                ])->save();
+                if (in_array($locked->launch_status, [
+                    AmpLaunchStatus::Launched,
+                    AmpLaunchStatus::Completed,
+                    AmpLaunchStatus::Failed,
+                ], true)) {
+                    $locked->forceFill([
+                        'delivery_status' => AmpDeliveryStatus::Delivered,
+                        'last_error_code' => null,
+                        'last_error_message' => null,
+                    ])->save();
 
-                return null;
+                    return null;
+                }
             }
 
             $locked->forceFill([
@@ -88,11 +94,15 @@ class DeliverAmpLaunch implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $payload = $payloadFactory->make($launch);
-        $body = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        $body = $launch->payload_body;
+        if (! $body) {
+            $body = $payloadFactory->body($launch);
+            $launch->forceFill([
+                'payload_body' => $body,
+                'payload_hash' => hash('sha256', $body),
+            ])->save();
+        }
         $timestamp = now()->getTimestamp();
-
-        $launch->forceFill(['payload_hash' => hash('sha256', $body)])->save();
 
         try {
             $response = Http::asJson()

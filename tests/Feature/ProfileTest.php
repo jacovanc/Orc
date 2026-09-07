@@ -3,6 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Models\WorkflowDefinition;
+use App\Services\WorkflowEngine;
+use Database\Seeders\DevelopmentWorkflowSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -94,6 +97,28 @@ class ProfileTest extends TestCase
             ->assertSessionHasErrorsIn('userDeletion', 'password')
             ->assertRedirect('/profile');
 
+        $this->assertNotNull($user->fresh());
+    }
+
+    public function test_account_with_retained_workflow_history_cannot_be_deleted(): void
+    {
+        $this->seed(DevelopmentWorkflowSeeder::class);
+        $user = User::factory()->create();
+        app(WorkflowEngine::class)->start(
+            $user,
+            WorkflowDefinition::query()->where('version', 1)->sole(),
+            'acme/widgets',
+            18,
+            'https://github.com/acme/widgets/issues/18',
+        );
+
+        $this->actingAs($user)
+            ->from('/profile')
+            ->delete('/profile', ['password' => 'password'])
+            ->assertRedirect('/profile')
+            ->assertSessionHasErrorsIn('userDeletion', 'workflow_history');
+
+        $this->assertAuthenticatedAs($user);
         $this->assertNotNull($user->fresh());
     }
 }

@@ -5,7 +5,7 @@
         </h2>
 
         <p class="mt-1 text-sm text-gray-600">
-            {{ __('Once your account is deleted, all of its resources and data will be permanently deleted. Before deleting your account, please download any data or information that you wish to retain.') }}
+            {{ __('Accounts without workflow history can be deleted permanently. Retained workflow audit history prevents account deletion.') }}
         </p>
     </header>
 
@@ -24,8 +24,10 @@
             </h2>
 
             <p class="mt-1 text-sm text-gray-600">
-                {{ __('Once your account is deleted, all of its resources and data will be permanently deleted. Please enter your password to confirm you would like to permanently delete your account.') }}
+                {{ __('If this account has no retained workflow history, deletion is permanent. Enter your password to confirm.') }}
             </p>
+
+            <x-input-error :messages="$errors->userDeletion->get('workflow_history')" class="mt-4" />
 
             <div class="mt-6">
                 <x-input-label for="password" value="{{ __('Password') }}" class="sr-only" />

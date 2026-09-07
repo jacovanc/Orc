@@ -35,7 +35,7 @@ class WorkflowEngineTest extends TestCase
 
     public function test_seeded_definition_has_the_required_versioned_graph(): void
     {
-        $definition = WorkflowDefinition::query()->with(['stages', 'transitions'])->sole();
+        $definition = WorkflowDefinition::query()->where('version', 1)->with(['stages', 'transitions'])->sole();
 
         $this->assertSame('development', $definition->key);
         $this->assertSame(1, $definition->version);
@@ -181,7 +181,7 @@ class WorkflowEngineTest extends TestCase
     public function test_stale_noncurrent_attempt_is_rejected(): void
     {
         $run = $this->startRun();
-        $qa = WorkflowDefinition::query()->sole()->stages()->where('key', 'qa')->sole();
+        $qa = WorkflowDefinition::query()->where('version', 1)->sole()->stages()->where('key', 'qa')->sole();
         $stale = StageRun::query()->create([
             'workflow_run_id' => $run->id,
             'workflow_stage_id' => $qa->id,
@@ -251,7 +251,7 @@ class WorkflowEngineTest extends TestCase
     public function test_database_constraint_prevents_two_active_attempts(): void
     {
         $run = $this->startRun();
-        $qa = WorkflowDefinition::query()->sole()->stages()->where('key', 'qa')->sole();
+        $qa = WorkflowDefinition::query()->where('version', 1)->sole()->stages()->where('key', 'qa')->sole();
 
         $this->expectException(QueryException::class);
 
@@ -284,7 +284,7 @@ class WorkflowEngineTest extends TestCase
     {
         return $this->engine->start(
             $this->user,
-            WorkflowDefinition::query()->sole(),
+            WorkflowDefinition::query()->where('version', 1)->sole(),
             'acme/widgets',
             42,
             'https://github.com/acme/widgets/issues/42',

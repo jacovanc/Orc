@@ -8,7 +8,9 @@ use App\Domain\Workflow\AmpLaunchStatus;
 use App\Domain\Workflow\Exceptions\WorkflowConflict;
 use App\Domain\Workflow\StageRunStatus;
 use App\Domain\Workflow\WorkflowStatus;
+use App\Jobs\DeliverAmpCancellation;
 use App\Jobs\DeliverAmpLaunch;
+use App\Jobs\ReconcileAmpLaunch;
 use App\Models\AmpIntegrationEvent;
 use App\Models\AmpLaunch;
 use App\Models\User;
@@ -20,6 +22,7 @@ use App\Services\WorkflowEngine;
 use Database\Seeders\DevelopmentWorkflowSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -61,6 +64,12 @@ class AmpIntegrationTest extends TestCase
         $this->assertTrue(Str::isUuid($launch->event_id));
         $this->assertTrue(Str::isUuid($launch->idempotency_key));
         $this->assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $launch->report_nonce);
+        $this->assertNotNull($launch->payload_body);
+        $this->assertSame(hash('sha256', $launch->payload_body), $launch->payload_hash);
+        $this->assertNotSame(
+            $launch->payload_body,
+            DB::table('amp_launches')->where('id', $launch->id)->value('payload_body'),
+        );
         $this->assertSame(AmpDeliveryStatus::Pending, $launch->delivery_status);
         $this->assertSame(AmpLaunchStatus::Pending, $launch->launch_status);
         Queue::assertPushed(DeliverAmpLaunch::class, 1);
@@ -132,6 +141,34 @@ class AmpIntegrationTest extends TestCase
         );
         $this->assertSame(AmpDeliveryStatus::Delivered, $launch->fresh()->delivery_status);
         $this->assertSame(2, $launch->fresh()->delivery_attempts);
+        $this->assertSame(hash('sha256', $requests[0]->body()), $launch->fresh()->payload_hash);
+    }
+
+    public function test_retry_after_a_persisted_claim_replays_the_same_launch_instead_of_silently_stopping(): void
+    {
+        $launch = $this->startRun()->activeStageRun->ampLaunch;
+        $requests = 0;
+        Http::fake(function () use ($launch, &$requests) {
+            $requests++;
+            if ($requests === 1) {
+                $this->ampCallback($launch, 'launch.claim');
+                throw new ConnectionException('response lost after claim');
+            }
+
+            return Http::response('', 202);
+        });
+
+        $job = new DeliverAmpLaunch($launch->id);
+        try {
+            $job->handle(app(AmpLaunchPayload::class), app(AmpSignature::class), $this->engine);
+        } catch (ConnectionException) {
+            // The durable queue retries this exact launch.
+        }
+        $job->handle(app(AmpLaunchPayload::class), app(AmpSignature::class), $this->engine);
+
+        $this->assertSame(2, $requests);
+        $this->assertSame(AmpLaunchStatus::Claimed, $launch->fresh()->launch_status);
+        $this->assertSame(AmpDeliveryStatus::Delivered, $launch->fresh()->delivery_status);
     }
 
     public function test_signed_callback_middleware_rejects_invalid_and_expired_signatures(): void
@@ -374,6 +411,39 @@ class AmpIntegrationTest extends TestCase
         $this->assertSame(AmpIntegrationEventStatus::Rejected, AmpIntegrationEvent::query()->latest('id')->first()->status);
     }
 
+    public function test_cancelling_a_bound_attempt_queues_and_delivers_an_exact_signed_thread_cancel(): void
+    {
+        $run = $this->startRun();
+        $launch = $run->activeStageRun->ampLaunch;
+        $thread = $this->threadId(8);
+        $this->ampCallback($launch, 'launch.claim');
+        $this->ampCallback($launch, 'launch.acknowledged', ['thread_id' => $thread]);
+
+        $this->engine->cancel($run, $this->user);
+        Queue::assertPushed(DeliverAmpCancellation::class, 1);
+        Queue::assertPushed(ReconcileAmpLaunch::class, 1);
+
+        Http::fake(['*' => Http::response('', 202)]);
+        (new DeliverAmpCancellation($launch->id))->handle(app(AmpSignature::class));
+
+        Http::assertSent(function ($request) use ($launch, $thread) {
+            $payload = $request->data();
+            $timestamp = (int) $request->header('X-Orc-Timestamp')[0];
+
+            return $payload['command'] === 'cancel'
+                && $payload['thread_id'] === $thread
+                && $request->header('X-Orc-Event-Id')[0] === $launch->fresh()->cancellation_event_id
+                && app(AmpSignature::class)->verify(
+                    $request->body(),
+                    $launch->fresh()->cancellation_event_id,
+                    $timestamp,
+                    $request->header('X-Orc-Signature')[0],
+                    config('services.amp.launch_signing_secret'),
+                );
+        });
+        $this->assertSame('delivered', $launch->fresh()->cancellation_status);
+    }
+
     public function test_agent_end_failure_closes_attempt_and_workflow_without_transition(): void
     {
         $run = $this->startRun();
@@ -428,7 +498,7 @@ class AmpIntegrationTest extends TestCase
     {
         return $this->engine->start(
             $this->user,
-            WorkflowDefinition::query()->sole(),
+            WorkflowDefinition::query()->where('version', 1)->sole(),
             'acme/widgets',
             42,
             'https://github.com/acme/widgets/issues/42',

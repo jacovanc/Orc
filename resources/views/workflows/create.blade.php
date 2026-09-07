@@ -60,7 +60,13 @@
             </div>
 
             <div class="flex flex-col gap-4 border-t border-white/[0.07] bg-black/10 px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
-                <p class="text-xs leading-5 text-zinc-600">Starts immediately in Development using simulation controls for this phase.</p>
+                <p class="text-xs leading-5 text-zinc-600">
+                    @if (config('services.amp.enabled'))
+                        Starts in a fresh Amp thread and Orb. Repository access must already be configured in Amp; Orc never provisions credentials.
+                    @else
+                        Starts immediately in Development using local simulation controls.
+                    @endif
+                </p>
                 <button class="button-primary" type="submit" @disabled($definitions->isEmpty())>Start workflow <span>→</span></button>
             </div>
         </form>

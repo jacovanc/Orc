@@ -1,4 +1,4 @@
-# Orc Milestones 1–5: Domain and Architecture
+# Orc Milestones 1–6: Domain and Architecture
 
 This document defines the domain and the integration boundaries before each implementation phase is introduced.
 
@@ -9,7 +9,7 @@ Orc is an orchestration system, not a second source of truth for software work.
 - **GitHub owns** requirements, source code, implementation discussion, review discussion, and reports.
 - **Laravel stores** GitHub identifiers/URLs and the minimum workflow state required to orchestrate work.
 - Orc does not persist private prompts, issue bodies, generated reports, review feedback, or hidden development context.
-- Agent stages use narrowly scoped Amp proof agents in Milestones 4–5. They may read the selected issue, publish an explicitly labelled test report, and complete their attempt; they cannot edit code. The simulation control remains a local-development fallback when integration is disabled.
+- Workflow v1 retains the Milestones 4–5 proof behavior. Workflow v2 uses a real Development agent followed by QA integration proof and an explicit human release gate. Simulation remains a local-development fallback only when integration is disabled.
 
 ## Domain model
 
@@ -77,27 +77,36 @@ Human Review (human) --approve--------> Done (terminal)
 
 ### Directional authentication
 
-Laravel and the Amp integration use independent HMAC-SHA256 secrets. Laravel signs launch requests with the launch secret; Amp signs claims, acknowledgements, context lookups, completions, and safety-net failures with the callback secret. A signature covers the exact request body, a unique event ID, and a Unix timestamp. Receivers reject missing signatures, mismatched event IDs, and timestamps outside the configured skew window. The durable Amp webhook URL is also a bearer capability and is stored only in deployment configuration.
+Laravel and the trusted Amp controller use independent HMAC-SHA256 secrets. Laravel signs launch, reconciliation, and cancellation requests with the launch secret; the controller signs launch claims and acknowledgements with the callback secret. A signature covers the exact request body, event ID, and Unix timestamp. Receivers reject missing signatures, mismatched event IDs, and timestamps outside the configured skew window. The durable Amp webhook URL is also a bearer capability and is stored only in deployment configuration. Fresh workers receive neither directional secret.
 
-The project-local plugin owns webhook registration, launch claims, thread creation, and monitoring. A global User Plugin publishes the three worker tools in fresh Orbs; it returns without registering anything unless Orc's project-scoped configuration is present. The proof agent never receives either signing secret, the webhook URL, or a GitHub token. Its custom agent exposes only three closure-backed tools: read the bound GitHub issue, publish one labelled test report to that issue, and complete the bound workflow attempt. It has no shell, file, generic network, or code-editing tools.
+The project-local plugin is the trusted controller. It owns webhook registration, launch claims, thread creation, and monitoring; its independent launch/callback signing secrets exist only in an owner-only local runtime file in the webhook-hosting Orb. A global User Plugin adds workflow tools in fresh Orbs without requiring project secrets. Every agent retains the normal Amp tools for its extended built-in mode.
+
+Laravel creates a random per-launch capability, stores its recoverable form encrypted and its lookup hash separately, and sends it through the signed launch. The controller supplies that capability to the bound thread. The capability can only query or mutate one current stage attempt with the exact bound thread and permitted outcomes; it cannot launch threads, target another run, grant repository access, or bypass Laravel's locks. Thus a full-shell coding Orb never receives a reusable callback signing secret.
+
+GitHub and Git authentication are not Orc capabilities. Agents and worker tools use the user's existing native Orb `git`/`gh` authentication. Missing access blocks work; Orc never provisions, copies, injects, repairs, or broadens credentials.
 
 ### At-most-once launch protocol
 
-Each agent `StageRun` gets one durable `AmpLaunch` record with stable event and idempotency keys. A queued Laravel job sends the same signed body and `Idempotency-Key` on every bounded retry. Delivery status and business launch status are separate so a callback may safely arrive before the launch HTTP response.
+Each agent `StageRun` gets one durable `AmpLaunch` record with stable event and idempotency keys. Laravel stores the canonical request body encrypted and resends those exact bytes on bounded retries. Delivery status and business launch status are separate so a callback may safely arrive before the launch HTTP response.
 
 Before creating a thread, the plugin obtains a transactional launch claim from Laravel. The first valid claim changes the persistent launch status from `pending` to `claimed`; duplicate webhook deliveries are denied. Only the holder of that claim calls `createThread({ executor: 'orb' })`, producing a fresh private thread and a fresh Orb for that stage attempt. Laravel then binds the returned thread ID to the still-current attempt. A retry never calls `createThread` after a claim, even if an acknowledgement was lost.
 
-This deliberately chooses at-most-once creation over blind recovery. A definitive non-retryable launch rejection is recorded as `failed`. Exhausted transport retries or failure after a claim are recorded as `ambiguous` and require inspection or cancellation; Orc never risks creating a duplicate Orb to hide uncertainty.
+This deliberately chooses at-most-once creation over blind recovery. A duplicate delivery after a claim can recover a durably bound thread, but a claim with no thread is marked ambiguous and never creates another Orb. After acknowledgement, bounded signed reconciliation deliveries recover an idempotent prompt (identified by a stable transcript marker) and controller monitor after process restart. A definitive non-retryable launch rejection is `failed`; unresolved uncertainty is `ambiguous` and requires inspection or cancellation.
 
 ### Callback processing
 
 Callback event IDs and payload hashes are persisted. Replaying the same event and payload returns the stored disposition; reusing an event ID with another payload is rejected. The central `WorkflowEngine` locks the callback event, launch, workflow, and expected attempt before binding a thread, transitioning an outcome, or recording a failure. A callback must identify the current attempt and its exact bound Amp thread. Cancelled workflows, superseded attempts, conflicting outcomes, and foreign threads are recorded as rejected integration events without mutating the workflow.
 
-An explicit `workflow_complete` tool is the normal completion path. A guarded `agent.end` hook gives the agent one corrective turn if it forgets the tool, then reports an agent failure rather than guessing an outcome. GitHub comment URLs are stored as report references; report text remains only on GitHub.
+An explicit `workflow_complete` tool is the normal completion path. A guarded `agent.end` hook/controller monitor gives the agent one corrective turn if it forgets the tool, then reports failure rather than guessing an outcome. Each launch has an unguessable report nonce and an exclusive persistent publication claim. The worker accepts an existing marker only from the native authenticated GitHub identity, paginates reconciliation, and uses the narrow capability to attest the report. Laravel durably binds that comment ID/URL and report kind before completion; report text remains only on GitHub.
+
+Cancellation closes the Laravel attempt first, transactionally preventing any late completion. When a thread is already bound, Laravel also queues a signed, retryable command to the trusted controller to call `thread.cancel()` on that exact thread. External GitHub or Git operations already in flight may still finish and must be inspected.
+
+When integration is enabled, workflow start fails closed unless both the normalized repository and initiating user's email are present in deployment-managed allowlists. This prevents public application users from directing the shared GitHub identity toward arbitrary accessible targets. Production registration is disabled independently of this authorization boundary.
 
 ## Current limitations
 
 - No workflow editor; definitions are seeded in code and the database.
 - No stored review-feedback text. Reviewers publish feedback on GitHub and submit its URL.
-- Development and QA agents are harmless integration proofs only: they do not modify code, create branches, or open pull requests. Those capabilities begin in Milestone 6 or later.
+- Real Development has mocked transport/domain verification but no authorized live coding target yet. The existing issue `jacovanc/Orc#1` remains proof-only and must not be repurposed.
+- QA in workflow v2 is orchestration proof only, named `proof_complete`, and is never code validation or approval. Real independent QA is Milestone 7.
 - Ambiguous launches are surfaced for operator action rather than automatically retried into a possible duplicate.

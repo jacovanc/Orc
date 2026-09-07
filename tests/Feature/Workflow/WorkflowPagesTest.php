@@ -36,7 +36,7 @@ class WorkflowPagesTest extends TestCase
 
     public function test_user_can_start_and_view_workflow_with_github_identifiers(): void
     {
-        $definition = WorkflowDefinition::query()->sole();
+        $definition = WorkflowDefinition::query()->where('version', 1)->sole();
 
         $response = $this->actingAs($this->user)->post(route('workflows.store'), [
             'workflow_definition_id' => $definition->id,
@@ -63,7 +63,7 @@ class WorkflowPagesTest extends TestCase
 
     public function test_start_rejects_mismatched_or_non_github_issue_urls(): void
     {
-        $definition = WorkflowDefinition::query()->sole();
+        $definition = WorkflowDefinition::query()->where('version', 1)->sole();
 
         foreach (['https://example.com/acme/widgets/issues/18', 'https://github.com/acme/other/issues/18'] as $url) {
             $this->actingAs($this->user)
@@ -171,7 +171,7 @@ class WorkflowPagesTest extends TestCase
     {
         return $this->engine->start(
             $this->user,
-            WorkflowDefinition::query()->sole(),
+            WorkflowDefinition::query()->where('version', 1)->sole(),
             'acme/widgets',
             18,
             'https://github.com/acme/widgets/issues/18',

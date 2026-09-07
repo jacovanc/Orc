@@ -47,6 +47,11 @@ class ProfileController extends Controller
         ]);
 
         $user = $request->user();
+        if ($user->workflowRuns()->exists()) {
+            return back()->withErrors([
+                'workflow_history' => 'This account owns retained workflow history and cannot be deleted.',
+            ], 'userDeletion');
+        }
 
         Auth::logout();
 

@@ -6,6 +6,11 @@ use App\Models\AmpLaunch;
 
 class AmpLaunchPayload
 {
+    public function body(AmpLaunch $launch): string
+    {
+        return json_encode($this->make($launch), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+    }
+
     public function make(AmpLaunch $launch): array
     {
         $launch->loadMissing([
@@ -15,6 +20,10 @@ class AmpLaunchPayload
 
         $attempt = $launch->stageRun;
         $run = $attempt->workflowRun;
+        $priorPullRequest = $run->stageRuns()
+            ->whereNotNull('github_pull_request_number')
+            ->latest('attempt_number')
+            ->first();
 
         return [
             'schema_version' => 1,
@@ -24,10 +33,18 @@ class AmpLaunchPayload
             'workflow_run_id' => $run->getKey(),
             'stage_key' => $attempt->stage->key,
             'stage_name' => $attempt->stage->name,
+            'agent_mode' => $attempt->stage->config['agent_mode']
+                ?? 'proof_'.$attempt->stage->key,
             'attempt_number' => $attempt->attempt_number,
             'github_repository' => $run->github_repository,
             'github_issue_number' => $run->github_issue_number,
             'github_issue_url' => $run->github_issue_url,
+            'report_nonce' => $launch->report_nonce,
+            'stage_capability_url' => url('/api/integrations/amp/stage-capability'),
+            'stage_capability_token' => $launch->capability_secret,
+            'expected_branch' => "orc/stage-{$attempt->getKey()}-attempt-{$attempt->attempt_number}",
+            'prior_pull_request_number' => $priorPullRequest?->github_pull_request_number,
+            'prior_pull_request_url' => $priorPullRequest?->github_pull_request_url,
             'allowed_outcomes' => $attempt->stage->outgoingTransitions
                 ->pluck('outcome')
                 ->values()

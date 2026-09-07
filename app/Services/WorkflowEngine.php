@@ -10,7 +10,9 @@ use App\Domain\Workflow\Exceptions\WorkflowConflict;
 use App\Domain\Workflow\StageRunStatus;
 use App\Domain\Workflow\StageType;
 use App\Domain\Workflow\WorkflowStatus;
+use App\Jobs\DeliverAmpCancellation;
 use App\Jobs\DeliverAmpLaunch;
+use App\Jobs\ReconcileAmpLaunch;
 use App\Models\AmpIntegrationEvent;
 use App\Models\AmpLaunch;
 use App\Models\StageRun;
@@ -310,14 +312,22 @@ class WorkflowEngine
                 'active_slot' => null,
                 'completed_at' => $now,
             ])->save();
-            $attempt->ampLaunch()->update([
-                'delivery_status' => AmpDeliveryStatus::Failed,
-                'launch_status' => AmpLaunchStatus::Failed,
-                'last_error_code' => 'workflow_cancelled',
-                'last_error_message' => 'The workflow was cancelled.',
-                'finished_at' => $now,
-                'updated_at' => $now,
-            ]);
+            $launch = $attempt->ampLaunch()->lockForUpdate()->first();
+            if ($launch) {
+                $cancellationEventId = $attempt->amp_thread_id ? (string) Str::uuid() : null;
+                $launch->forceFill([
+                    'delivery_status' => AmpDeliveryStatus::Failed,
+                    'launch_status' => AmpLaunchStatus::Failed,
+                    'last_error_code' => 'workflow_cancelled',
+                    'last_error_message' => 'The workflow was cancelled.',
+                    'cancellation_event_id' => $cancellationEventId,
+                    'cancellation_status' => $cancellationEventId ? 'pending' : null,
+                    'finished_at' => $now,
+                ])->save();
+                if ($cancellationEventId) {
+                    DeliverAmpCancellation::dispatch($launch->getKey())->afterCommit();
+                }
+            }
             $lockedRun->forceFill([
                 'status' => WorkflowStatus::Cancelled,
                 'cancelled_at' => $now,
@@ -355,7 +365,9 @@ class WorkflowEngine
                         'launch.claim' => $this->claimAmpLaunch($payload),
                         'launch.acknowledged' => $this->acknowledgeAmpLaunch($payload),
                         'launch.ambiguous' => $this->acceptAmpAmbiguity($payload),
+                        'stage.report_claimed' => $this->claimAmpReportPublication($payload),
                         'stage.reported' => $this->recordAmpReport($payload),
+                        'stage.published' => $this->recordAmpPublication($payload),
                         'stage.completed' => $this->completeAmpStage($payload),
                         'stage.failed' => $this->failAmpStage($payload),
                     };
@@ -413,6 +425,7 @@ class WorkflowEngine
             'workflow_run_id' => $attempt->workflow_run_id,
             'stage_key' => $attempt->stage->key,
             'stage_name' => $attempt->stage->name,
+            'agent_mode' => $this->agentMode($attempt->stage),
             'attempt_number' => $attempt->attempt_number,
             'github_repository' => $attempt->workflowRun->github_repository,
             'github_issue_number' => $attempt->workflowRun->github_issue_number,
@@ -420,10 +433,47 @@ class WorkflowEngine
             'report_nonce' => $attempt->ampLaunch->report_nonce,
             'github_report_url' => $attempt->github_report_url,
             'github_report_comment_id' => $attempt->github_report_comment_id,
+            'github_report_kind' => $attempt->github_report_kind,
+            'expected_branch' => $this->expectedBranch($attempt),
+            'github_branch' => $attempt->github_branch,
+            'github_pull_request_number' => $attempt->github_pull_request_number,
+            'github_pull_request_url' => $attempt->github_pull_request_url,
             'allowed_outcomes' => $attempt->stage->outgoingTransitions->pluck('outcome')->values()->all(),
+            'completed' => $attempt->status === StageRunStatus::Completed,
+            'outcome' => $attempt->outcome,
             'is_active' => $attempt->active_slot === 1
                 && $attempt->workflowRun->status === WorkflowStatus::Running,
         ];
+    }
+
+    public function stageCapabilityContext(string $token, string $threadId): array
+    {
+        $launch = $this->capabilityLaunch($token);
+        $this->assertMatchingAmpThread($launch->stageRun, $threadId);
+
+        return $this->ampContext($threadId);
+    }
+
+    public function handleStageCapability(string $token, array $payload, string $payloadHash): array
+    {
+        $launch = $this->capabilityLaunch($token);
+        $type = match ($payload['action']) {
+            'report' => 'stage.reported',
+            'report_claim' => 'stage.report_claimed',
+            'publication' => 'stage.published',
+            'complete' => 'stage.completed',
+            'fail' => 'stage.failed',
+        };
+
+        return $this->handleAmpCallback([
+            ...$payload,
+            'type' => $type,
+            'idempotency_key' => $launch->idempotency_key,
+            'launch_event_id' => $launch->event_id,
+            'stage_run_id' => $launch->stage_run_id,
+            'report_nonce' => $launch->report_nonce,
+            'capability_authenticated' => true,
+        ], $payloadHash);
     }
 
     public function failAmpLaunchDelivery(
@@ -548,6 +598,12 @@ class WorkflowEngine
             return ['accepted' => true, 'disposition' => 'already_completed'];
         }
 
+        if ($launch->launch_status === AmpLaunchStatus::Launched) {
+            $this->assertMatchingAmpThread($launch->stageRun, $threadId);
+
+            return ['accepted' => true, 'disposition' => 'already_launched'];
+        }
+
         if (! in_array($launch->launch_status, [
             AmpLaunchStatus::Claimed,
             AmpLaunchStatus::Launched,
@@ -570,6 +626,9 @@ class WorkflowEngine
             'attempt_number' => $launch->stageRun->attempt_number,
             'amp_thread_id' => $threadId,
         ]);
+        ReconcileAmpLaunch::dispatch($launch->getKey(), 1)
+            ->delay(now()->addMinutes(5))
+            ->afterCommit();
 
         return ['accepted' => true, 'disposition' => 'launched'];
     }
@@ -639,6 +698,23 @@ class WorkflowEngine
             $this->assertGitHubReport($launch->stageRun->workflowRun, $reportUrl);
         }
 
+        $mode = $this->agentMode($launch->stageRun->stage);
+        if ($mode === 'real_development' && $outcome === 'success') {
+            if (
+                $launch->stageRun->github_branch !== $this->expectedBranch($launch->stageRun)
+                || ! $launch->stageRun->github_pull_request_number
+                || ! $launch->stageRun->github_pull_request_url
+            ) {
+                throw new WorkflowConflict('Real Development success requires its deterministic branch and open pull request.');
+            }
+        }
+        if (! empty($payload['capability_authenticated']) && $mode === 'real_development' && $launch->stageRun->github_report_kind !== $outcome) {
+            throw new WorkflowConflict('The Development report kind must match its completion outcome.');
+        }
+        if (! empty($payload['capability_authenticated']) && $mode === 'proof_qa' && $launch->stageRun->github_report_kind !== 'proof') {
+            throw new WorkflowConflict('QA integration proof requires a proof-only report.');
+        }
+
         $run = $this->completeAttempt(
             $launch->stageRun->workflowRun,
             $launch->stageRun,
@@ -670,6 +746,7 @@ class WorkflowEngine
         $reportUrl = $payload['github_report_url'] ?? null;
         $commentId = $payload['github_report_comment_id'] ?? null;
         $nonce = $payload['report_nonce'] ?? null;
+        $reportKind = $payload['github_report_kind'] ?? null;
         $launch = $this->lockedAmpLaunch($payload);
 
         if (! $launch->report_nonce || ! is_string($nonce) || ! hash_equals($launch->report_nonce, $nonce)) {
@@ -679,11 +756,20 @@ class WorkflowEngine
         $this->assertCurrentAmpAttempt($launch->stageRun);
         $this->bindAmpThread($launch->stageRun, $threadId);
         $this->assertGitHubReport($launch->stageRun->workflowRun, $reportUrl, $commentId);
+        if (! empty($payload['capability_authenticated'])) {
+            $allowedKinds = $this->agentMode($launch->stageRun->stage) === 'real_development'
+                ? ['success', 'blocked']
+                : ['proof'];
+            if (! is_string($reportKind) || ! in_array($reportKind, $allowedKinds, true)) {
+                throw new WorkflowConflict('The stage report kind is invalid for this agent mode.');
+            }
+        }
 
         if ($launch->stageRun->github_report_url || $launch->stageRun->github_report_comment_id) {
             if (
                 $launch->stageRun->github_report_url !== $reportUrl
                 || $launch->stageRun->github_report_comment_id !== $commentId
+                || $launch->stageRun->github_report_kind !== $reportKind
             ) {
                 throw new WorkflowConflict('A different GitHub report is already attested for this attempt.');
             }
@@ -694,16 +780,98 @@ class WorkflowEngine
         $launch->stageRun->forceFill([
             'github_report_url' => $reportUrl,
             'github_report_comment_id' => $commentId,
+            'github_report_kind' => $reportKind,
         ])->save();
         $this->recordEvent($launch->stageRun->workflowRun, $launch->stageRun, 'stage.reported', null, [
             'stage_key' => $launch->stageRun->stage->key,
             'attempt_number' => $launch->stageRun->attempt_number,
             'github_report_url' => $reportUrl,
             'github_report_comment_id' => $commentId,
+            'github_report_kind' => $reportKind,
             'amp_thread_id' => $threadId,
         ]);
 
         return ['accepted' => true, 'disposition' => 'reported'];
+    }
+
+    private function claimAmpReportPublication(array $payload): array
+    {
+        $threadId = $this->requiredThreadId($payload);
+        $launch = $this->lockedAmpLaunch($payload);
+
+        $this->assertCurrentAmpAttempt($launch->stageRun);
+        $this->bindAmpThread($launch->stageRun, $threadId);
+        if ($launch->stageRun->github_report_url) {
+            return ['accepted' => true, 'disposition' => 'already_reported', 'publish' => false];
+        }
+        if ($launch->report_claimed_at) {
+            return [
+                'accepted' => false,
+                'disposition' => 'publication_ambiguous',
+                'publish' => false,
+                'reason' => 'Another report publication call already owns this attempt.',
+            ];
+        }
+
+        $launch->forceFill(['report_claimed_at' => now()])->save();
+        $this->recordEvent($launch->stageRun->workflowRun, $launch->stageRun, 'stage.report_claimed', null, [
+            'stage_key' => $launch->stageRun->stage->key,
+            'attempt_number' => $launch->stageRun->attempt_number,
+            'amp_thread_id' => $threadId,
+        ]);
+
+        return ['accepted' => true, 'disposition' => 'report_claimed', 'publish' => true];
+    }
+
+    private function recordAmpPublication(array $payload): array
+    {
+        $threadId = $this->requiredThreadId($payload);
+        $branch = $payload['github_branch'] ?? null;
+        $pullRequestNumber = $payload['github_pull_request_number'] ?? null;
+        $pullRequestUrl = $payload['github_pull_request_url'] ?? null;
+        $launch = $this->lockedAmpLaunch($payload);
+
+        $this->assertCurrentAmpAttempt($launch->stageRun);
+        $this->bindAmpThread($launch->stageRun, $threadId);
+        if ($this->agentMode($launch->stageRun->stage) !== 'real_development') {
+            throw new WorkflowConflict('Only a real Development attempt can publish code.');
+        }
+        if (! is_string($branch) || $branch !== $this->expectedBranch($launch->stageRun)) {
+            throw new WorkflowConflict('The published branch does not match this Development attempt.');
+        }
+        $this->assertGitHubPullRequest(
+            $launch->stageRun->workflowRun,
+            $pullRequestNumber,
+            $pullRequestUrl,
+        );
+
+        if ($launch->stageRun->github_pull_request_number) {
+            if (
+                $launch->stageRun->github_branch !== $branch
+                || $launch->stageRun->github_pull_request_number !== $pullRequestNumber
+                || $launch->stageRun->github_pull_request_url !== $pullRequestUrl
+            ) {
+                throw new WorkflowConflict('A different code publication is already bound to this attempt.');
+            }
+
+            return ['accepted' => true, 'disposition' => 'already_published'];
+        }
+
+        $launch->stageRun->forceFill([
+            'github_branch' => $branch,
+            'github_pull_request_number' => $pullRequestNumber,
+            'github_pull_request_url' => $pullRequestUrl,
+        ])->save();
+        $this->recordEvent($launch->stageRun->workflowRun, $launch->stageRun, 'stage.published', null, [
+            'stage_key' => $launch->stageRun->stage->key,
+            'attempt_number' => $launch->stageRun->attempt_number,
+            'github_branch' => $branch,
+            'github_pull_request_number' => $pullRequestNumber,
+            'github_pull_request_url' => $pullRequestUrl,
+            'amp_thread_id' => $threadId,
+        ]);
+
+        return ['accepted' => true, 'disposition' => 'published'];
     }
 
     private function failAmpStage(array $payload): array
@@ -761,6 +929,23 @@ class WorkflowEngine
 
         if (! $launch) {
             throw new WorkflowConflict('The Amp callback does not match a launch request.');
+        }
+
+        return $launch;
+    }
+
+    private function capabilityLaunch(string $token): AmpLaunch
+    {
+        if (strlen($token) < 32) {
+            throw new WorkflowConflict('The stage capability is invalid.');
+        }
+
+        $launch = AmpLaunch::query()
+            ->with(['stageRun.stage.outgoingTransitions', 'stageRun.workflowRun'])
+            ->where('capability_hash', hash('sha256', $token))
+            ->first();
+        if (! $launch || ! $launch->capability_secret || ! hash_equals($launch->capability_secret, $token)) {
+            throw new WorkflowConflict('The stage capability is invalid.');
         }
 
         return $launch;
@@ -833,18 +1018,40 @@ class WorkflowEngine
         }
     }
 
+    private function assertGitHubPullRequest(
+        WorkflowRun $run,
+        mixed $pullRequestNumber,
+        mixed $pullRequestUrl,
+    ): void {
+        if (! is_int($pullRequestNumber) || $pullRequestNumber < 1) {
+            throw new WorkflowConflict('A valid GitHub pull request number is required.');
+        }
+        if (! is_string($pullRequestUrl) || ! $this->isGitHubUrl($pullRequestUrl)) {
+            throw new WorkflowConflict('A valid GitHub pull request URL is required.');
+        }
+
+        $path = strtolower(rtrim((string) parse_url($pullRequestUrl, PHP_URL_PATH), '/'));
+        $expectedPath = strtolower('/'.$run->github_repository.'/pull/'.$pullRequestNumber);
+        if ($path !== $expectedPath) {
+            throw new WorkflowConflict('The pull request URL must belong to this workflow repository.');
+        }
+    }
+
     private function queueAmpLaunch(WorkflowRun $run, StageRun $attempt): void
     {
         if (! config('services.amp.enabled') || $attempt->stage->type !== StageType::Agent) {
             return;
         }
 
+        $capability = Str::random(64);
         $launch = AmpLaunch::query()->firstOrCreate(
             ['stage_run_id' => $attempt->getKey()],
             [
                 'event_id' => (string) Str::uuid(),
                 'idempotency_key' => (string) Str::uuid(),
                 'report_nonce' => bin2hex(random_bytes(32)),
+                'capability_secret' => $capability,
+                'capability_hash' => hash('sha256', $capability),
                 'delivery_status' => AmpDeliveryStatus::Pending,
                 'launch_status' => AmpLaunchStatus::Pending,
             ],
@@ -853,6 +1060,12 @@ class WorkflowEngine
         if (! $launch->wasRecentlyCreated) {
             return;
         }
+
+        $body = app(AmpLaunchPayload::class)->body($launch);
+        $launch->forceFill([
+            'payload_body' => $body,
+            'payload_hash' => hash('sha256', $body),
+        ])->save();
 
         $this->recordEvent($run, $attempt, 'stage.launch_queued', null, [
             'stage_key' => $attempt->stage->key,
@@ -977,5 +1190,15 @@ class WorkflowEngine
         $host = strtolower((string) parse_url($url, PHP_URL_HOST));
 
         return $scheme === 'https' && in_array($host, ['github.com', 'www.github.com'], true);
+    }
+
+    private function agentMode(WorkflowStage $stage): string
+    {
+        return $stage->config['agent_mode'] ?? 'proof_'.$stage->key;
+    }
+
+    private function expectedBranch(StageRun $attempt): string
+    {
+        return "orc/stage-{$attempt->getKey()}-attempt-{$attempt->attempt_number}";
     }
 }

@@ -10,3 +10,6 @@ Route::middleware([VerifyAmpCallbackSignature::class, 'throttle:60,1'])
         Route::post('/callback', [AmpIntegrationController::class, 'callback']);
         Route::post('/context', [AmpIntegrationController::class, 'context']);
     });
+
+Route::post('/integrations/amp/stage-capability', [AmpIntegrationController::class, 'stageCapability'])
+    ->middleware('throttle:120,1');

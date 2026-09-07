@@ -22,7 +22,9 @@ class AmpIntegrationController extends Controller
                 'launch.claim',
                 'launch.acknowledged',
                 'launch.ambiguous',
+                'stage.report_claimed',
                 'stage.reported',
+                'stage.published',
                 'stage.completed',
                 'stage.failed',
             ])],
@@ -34,6 +36,10 @@ class AmpIntegrationController extends Controller
             'outcome' => ['nullable', 'string', 'max:64'],
             'github_report_url' => ['nullable', 'url:https', 'max:2048'],
             'github_report_comment_id' => ['nullable', 'integer', 'min:1'],
+            'github_report_kind' => ['nullable', Rule::in(['proof', 'success', 'blocked'])],
+            'github_branch' => ['nullable', 'string', 'max:255'],
+            'github_pull_request_number' => ['nullable', 'integer', 'min:1'],
+            'github_pull_request_url' => ['nullable', 'url:https', 'max:2048'],
             'report_nonce' => ['nullable', 'string', 'size:64'],
             'reason' => ['nullable', 'string', 'max:500'],
         ]);
@@ -73,5 +79,45 @@ class AmpIntegrationController extends Controller
         } catch (WorkflowConflict $exception) {
             return response()->json(['message' => $exception->getMessage()], 404);
         }
+    }
+
+    public function stageCapability(Request $request): JsonResponse
+    {
+        $token = $request->bearerToken();
+        if (! is_string($token) || $token === '') {
+            return response()->json(['message' => 'A stage capability is required.'], 401);
+        }
+
+        $payload = $request->validate([
+            'schema_version' => ['required', 'integer', 'in:1'],
+            'event_id' => ['required', 'uuid'],
+            'action' => ['required', Rule::in(['context', 'report_claim', 'report', 'publication', 'complete', 'fail'])],
+            'occurred_at' => ['required', 'date'],
+            'thread_id' => ['required', 'string', 'regex:/^T-[A-Za-z0-9-]+$/'],
+            'outcome' => ['nullable', 'string', 'max:64'],
+            'github_report_url' => ['nullable', 'url:https', 'max:2048'],
+            'github_report_comment_id' => ['nullable', 'integer', 'min:1'],
+            'github_report_kind' => ['nullable', Rule::in(['proof', 'success', 'blocked'])],
+            'github_branch' => ['nullable', 'string', 'max:255'],
+            'github_pull_request_number' => ['nullable', 'integer', 'min:1'],
+            'github_pull_request_url' => ['nullable', 'url:https', 'max:2048'],
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        try {
+            if ($payload['action'] === 'context') {
+                return response()->json($this->engine->stageCapabilityContext($token, $payload['thread_id']));
+            }
+
+            $result = $this->engine->handleStageCapability(
+                $token,
+                $payload,
+                hash('sha256', $token."\0".$request->getContent()),
+            );
+        } catch (WorkflowConflict $exception) {
+            return response()->json(['message' => $exception->getMessage()], 409);
+        }
+
+        return response()->json($result, $result['accepted'] ? 200 : 202);
     }
 }

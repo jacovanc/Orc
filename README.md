@@ -2,7 +2,7 @@
 
 Orc is a Laravel-native workflow orchestrator for software delivery. It coordinates agent stages, QA loops, and human approval while keeping requirements, code, discussion, feedback, and reports in GitHub.
 
-Milestones 1–5 are implemented as an authenticated, server-rendered MVP with a durable Laravel↔Amp integration. Read the [domain and architecture](docs/architecture.md) and [Amp integration runbook](docs/amp-integration.md) before extending the workflow engine.
+Milestones 1–6 are implemented as an authenticated, server-rendered application with durable Laravel↔Amp orchestration and real Development mode. Read the [domain and architecture](docs/architecture.md), [Amp integration runbook](docs/amp-integration.md), and [Milestone 6 design](docs/milestone-6-design.md) before extending the workflow engine.
 
 ## What is included
 
@@ -12,7 +12,7 @@ Milestones 1–5 are implemented as an authenticated, server-rendered MVP with a
 - Append-only workflow events and stable historical stage attempts.
 - Authenticated list, manual start, detail, status, stage graph, attempt table, event timeline, GitHub links, human actions, and cancellation pages.
 - Durable queued Amp launches with bounded retries, stable idempotency keys, explicit ambiguous outcomes, persistent callback deduplication, and separate delivery/business state.
-- A project-local Amp controller plugin plus a restricted User Plugin worker that claim before creating one fresh private thread and Orb per agent attempt, expose only harmless proof tools, and return signed completions.
+- A trusted project-local Amp controller plus a secretless global User Plugin worker. Agents retain normal tools and gain stage-bound workflow tools in one fresh private thread and Orb per attempt.
 - Explicit agent simulation controls when the integration is disabled, so orchestration can still be exercised without Amp.
 - Laravel Breeze authentication and owner-scoped workflow access.
 
@@ -33,12 +33,13 @@ Orc does **not** store issue bodies, prompts, generated code, reports, discussio
 The integration is disabled by default. It requires a database queue worker and two independent, randomly generated HMAC secrets—one for Laravel→Amp launches and another for Amp→Laravel callbacks.
 
 1. Put the callback base URL and secrets in the gitignored `.amp/runtime/orc-plugin.json` with owner-only permissions.
-2. Install the restricted `orc-worker` User Plugin and store the same callback URL, callback secret, launch secret, and GitHub token as Orc project-scoped Amp configuration. The worker remains inert in projects without that configuration.
+2. Install the `orc-worker` User Plugin. It adds stage-bound workflow tools and does not need or read project secrets.
 3. Reload the checked-in `.amp/plugins/orc-integration` controller plugin from an Amp-managed Orb. It writes its durable capability URL to gitignored `.amp/runtime/launch-webhook-url`.
-4. Configure the matching Laravel variables listed in `.env.example`, set `QUEUE_CONNECTION=database`, and run a worker for the `amp-launches` queue.
+4. Configure the matching Laravel variables listed in `.env.example`, including fail-closed `AMP_ALLOWED_REPOSITORIES` and `AMP_ALLOWED_USER_EMAILS`, set `QUEUE_CONNECTION=database`, and run a worker for the `amp-launches` queue.
 5. Enable `AMP_INTEGRATION_ENABLED` only after both callback and launch directions are configured.
+6. Confirm every target repository is already accessible through native `git` and `gh` authentication in a fresh Orb. Orc never provisions, copies, or repairs GitHub access.
 
-Never commit, log, or show the secrets, GitHub token, or webhook URL. Exact configuration, rotation, failure handling, and proof-agent boundaries are in [docs/amp-integration.md](docs/amp-integration.md).
+Never commit, log, or show the directional secrets, per-launch capabilities, or webhook URL. Orc does not own a GitHub token. Exact configuration, rotation, failure handling, and trust boundaries are in [docs/amp-integration.md](docs/amp-integration.md).
 
 ## Local setup
 
@@ -82,17 +83,21 @@ Laravel Cloud needs a database because workflow state and authentication are per
 - build command: `composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader && npm ci --audit false && npm run build`
 - deploy command: `php artisan migrate --force && php artisan db:seed --force`
 
-The seed is idempotent and creates the immutable Development workflow v1. Production also needs a supervised `php artisan queue:work database --queue=amp-launches` process. Do not put GitHub or Amp credentials into source control.
+The seed is idempotent and preserves immutable workflow v1 while creating real-Development workflow v2. Production also needs a supervised `php artisan queue:work database --queue=amp-launches` process. Do not put Amp credentials into source control; GitHub access remains native user-configured Orb state, never Orc configuration.
 
 Deployment status and exact verification evidence are recorded in [IMPLEMENTATION.md](IMPLEMENTATION.md).
 
 ## Current limitations
 
-- Development and QA agents are harmless integration proofs. They read the bound issue, publish a clearly labelled test comment, and complete the stage; they do not modify code, branches, pull requests, labels, or issue state.
+- Workflow definition v1 retains the harmless Development/QA integration proof. Definition v2 adds real Development and keeps QA explicitly proof-only until Milestone 7.
+- Amp launches fail closed unless both the repository and initiating user are explicitly allowlisted. Production self-registration is disabled; account provisioning remains an operator action.
+- Agents retain normal Amp shell, editing, web, MCP, and other default tools. Orc adds workflow tools and enforces authority at Laravel's orchestration boundary rather than by suppressing tools.
+- A per-launch capability replaces broad callback credentials in fresh coding Orbs. It is bound to one attempt/thread and cannot grant repository access.
+- Reports use an unguessable per-launch nonce, native GitHub author checks, paginated reconciliation, and durable Laravel attestation before completion.
 - A crash in the narrow interval after Amp creates a thread but before Laravel receives its thread ID leaves the launch claimed for manual reconciliation. Orc deliberately does not risk a duplicate Orb.
 - Change feedback must be published manually on GitHub; Orc stores its URL only.
 - There is no workflow editor. Definitions are seeded and versioned in code/database.
-- Real Development/QA coding behavior begins in Milestone 6 or later.
+- Real Development is implemented but has no authorized live coding proof yet because the only current issue is reserved for integration testing. Independent real QA remains Milestone 7 work.
 
 ## Design rules for later phases
 

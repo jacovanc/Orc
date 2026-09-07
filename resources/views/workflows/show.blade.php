@@ -6,6 +6,7 @@
         $outcomes = $active?->stage?->outgoingTransitions ?? collect();
         $ampEnabled = (bool) config('services.amp.enabled');
         $activeLaunch = $active?->ampLaunch;
+        $activeMode = $active?->stage?->config['agent_mode'] ?? null;
     @endphp
 
     <div class="flex flex-col justify-between gap-6 lg:flex-row lg:items-start">
@@ -60,7 +61,11 @@
                     <p class="mt-3 text-sm leading-6 text-zinc-400">
                         @if ($active->stage->type === \App\Domain\Workflow\StageType::Agent)
                             @if ($ampEnabled)
-                                A dedicated proof agent is running in a fresh private Amp thread and Orb. It can only read this issue, publish one labelled test report, and complete this stage.
+                                @if ($activeMode === 'real_development')
+                                    A fresh private Amp thread and Orb is implementing the bound issue with normal Amp tools and your existing native repository access. Orc never provisions or copies GitHub credentials.
+                                @else
+                                    A fresh private Amp thread and Orb is running an integration proof. It has normal Amp tools but is instructed to make no code changes; its result is not code validation or approval.
+                                @endif
                             @else
                                 Amp execution is disabled. Use the explicit simulation control to test orchestration locally.
                             @endif
@@ -71,6 +76,11 @@
                     <div class="mt-6 flex items-center gap-2">
                         <span class="status-pill status-{{ $active->status->value }}">{{ $active->status->value }}</span>
                         <span class="font-mono text-[10px] uppercase tracking-wider text-zinc-600">{{ $active->stage->type->value }} stage</span>
+                        @if ($activeMode === 'real_development')
+                            <span class="rounded-full border border-sky-300/20 bg-sky-300/[0.08] px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-sky-200">Real Development</span>
+                        @elseif ($activeMode)
+                            <span class="rounded-full border border-amber-300/20 bg-amber-300/[0.08] px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-amber-200">Integration proof</span>
+                        @endif
                     </div>
                 </div>
 
@@ -120,6 +130,11 @@
                             </div>
                         @endif
                     @else
+                        @if ($run->definition->version >= 2 && $active->stage->key === 'human_review')
+                            <div class="mb-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-xs leading-5 text-amber-100/80">
+                                <strong class="text-amber-200">Human release gate.</strong> QA was an integration proof only; no independent substantive code validation has occurred yet.
+                            </div>
+                        @endif
                         @foreach ($outcomes as $transition)
                             @if ($transition->outcome === 'request_changes')
                                 <form method="POST" action="{{ route('workflows.attempts.human-action', [$run, $active]) }}" class="rounded-2xl border border-white/[0.08] bg-black/10 p-5">
@@ -136,6 +151,14 @@
                                     <input type="hidden" name="outcome" value="approve">
                                     <div><p class="text-sm font-medium text-emerald-100">Ready to ship</p><p class="mt-1 text-xs text-emerald-200/50">Approve and complete this workflow.</p></div>
                                     <button class="button-primary bg-emerald-500 hover:bg-emerald-400" type="submit">Approve</button>
+                                </form>
+                            @elseif ($transition->outcome === 'retry')
+                                <form method="POST" action="{{ route('workflows.attempts.human-action', [$run, $active]) }}" class="rounded-2xl border border-sky-300/15 bg-sky-300/[0.05] p-5">
+                                    @csrf
+                                    <input type="hidden" name="outcome" value="retry">
+                                    <p class="text-sm font-medium text-sky-100">Retry Development</p>
+                                    <p class="mt-1 text-xs leading-5 text-sky-200/60">Starts a new numbered attempt in a fresh thread and Orb. The agent rereads GitHub from scratch.</p>
+                                    <button class="button-primary mt-4 bg-sky-500 hover:bg-sky-400" type="submit">Retry <span class="opacity-60">→ Real Development</span></button>
                                 </form>
                             @endif
                         @endforeach
@@ -173,7 +196,14 @@
                             @endphp
                             <tr class="text-sm">
                                 <td class="px-6 py-4 font-mono text-xs text-zinc-500">#{{ str_pad($attempt->attempt_number, 2, '0', STR_PAD_LEFT) }}</td>
-                                <td class="px-4 py-4 font-medium text-zinc-200">{{ $attempt->stage->name }}</td>
+                                <td class="px-4 py-4 font-medium text-zinc-200">
+                                    {{ $attempt->stage->name }}
+                                    @if (($attempt->stage->config['agent_mode'] ?? null) === 'real_development')
+                                        <span class="ml-2 rounded-full border border-sky-300/20 px-2 py-0.5 font-mono text-[8px] uppercase text-sky-200">real</span>
+                                    @elseif (isset($attempt->stage->config['agent_mode']))
+                                        <span class="ml-2 rounded-full border border-amber-300/20 px-2 py-0.5 font-mono text-[8px] uppercase text-amber-200">proof</span>
+                                    @endif
+                                </td>
                                 <td class="px-4 py-4"><span class="status-pill status-{{ $attempt->status->value }}">{{ $attempt->status->value }}</span></td>
                                 <td class="px-4 py-4 text-zinc-400">{{ $attempt->outcome ? str($attempt->outcome)->replace('_', ' ')->title() : '—' }}</td>
                                 <td class="px-6 py-4 text-right text-xs">
@@ -184,6 +214,12 @@
                                     @endif
                                     @if ($reportEvent)
                                         <a class="ml-3 text-zinc-400 hover:text-white" href="{{ $reportEvent->metadata['github_report_url'] }}" target="_blank" rel="noopener">Report ↗</a>
+                                    @endif
+                                    @if ($attempt->github_pull_request_url)
+                                        <a class="ml-3 text-sky-300 hover:text-sky-200" href="{{ $attempt->github_pull_request_url }}" target="_blank" rel="noopener">PR #{{ $attempt->github_pull_request_number }} ↗</a>
+                                    @endif
+                                    @if ($attempt->github_branch)
+                                        <a class="ml-3 text-zinc-500 hover:text-zinc-300" href="https://github.com/{{ $run->github_repository }}/tree/{{ rawurlencode($attempt->github_branch) }}" target="_blank" rel="noopener">Branch ↗</a>
                                     @endif
                                 </td>
                             </tr>
