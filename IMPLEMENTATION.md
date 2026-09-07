@@ -49,6 +49,8 @@ Milestones 1–6: authenticated Laravel application, versioned workflow domain, 
 - Rendered Milestone 6 states passed browser console/error checks and visual inspection: `.amp/in/artifacts/m6-real-development-active.png`, `.amp/in/artifacts/m6-development-blocked.png`, and `.amp/in/artifacts/m6-human-review-proof-warning.png`. The launch identifier shown in the active state is a non-secret stable idempotency identifier.
 - Laravel Cloud deployment `depl-a2b0ead3-da4a-4a12-9e4d-b82fb1a5c500`: **`deployment.succeeded`**, source commit `ff5732952ed511ffa2fced9d4fa00a7e008782cd`.
 - Final Laravel Cloud deployment `depl-a2b11f89-b89b-47f7-91f1-8d35091be5a0`: **`deployment.succeeded`**, source commit `daa5b06aef4b56e2f37c9b54375b09d984bf2e72` containing the live-proven controller topology and production screenshot.
+- Milestone 6 Laravel Cloud deployment `depl-a2b14b1c-1278-4fe9-95ac-6f22147860b9`: **`deployment.succeeded`**, source commit `bc81554e34056adf00f28a013d49350930dec751`. Production command `comm-a2b14bf8-9e38-4c70-805f-acf58265ae60` exited 0 and reported all seven migrations `Ran`, including `2026_09_07_230000_add_real_development_workflow` in batch 4.
+- Post-deployment HTTP smoke: `/`, `/login`, and `/up` returned **200**; `/register` returned **404**; unauthenticated `/workflows` returned **302** to `/login`; the compiled CSS asset returned **200**.
 - Laravel Cloud background process `process-a2b0eb69-ac71-4ef1-806e-93a70c442d92`: one database worker on queue `amp-launches`, four tries, bounded backoff, and a 30-second worker timeout.
 
 ## Deployment
@@ -62,4 +64,5 @@ Production is live at <https://orc-production-trttyo.laravel.cloud/>.
 - Environment variables include a Laravel Cloud-managed `APP_KEY`, production mode with debug disabled, the canonical application URL, and stderr logging. Secret values were never printed or committed.
 - Build uses optimized production Composer dependencies and compiled Vite assets. Deploy runs `php artisan migrate --force && php artisan db:seed --force`.
 - Integration variables and independent directional secrets are configured without exposing their values. `AMP_INTEGRATION_ENABLED` is active; the deployed database queue worker delivers to the durable controller webhook.
-- The deployed Laravel source is commit `daa5b06aef4b56e2f37c9b54375b09d984bf2e72`; the following handoff commit updates only this deployment record.
+- The Milestone 6 application source was deployed from commit `bc81554e34056adf00f28a013d49350930dec751`; the following handoff commit updates only this deployment record.
+- The global User Plugin is published at `b6c3075`. Reload User Plugins before starting another agent stage so fresh Orbs receive that worker revision; no live Milestone 6 coding run was attempted without both a designated issue and confirmed reload.
