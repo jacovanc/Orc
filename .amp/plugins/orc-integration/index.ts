@@ -1,3 +1,5 @@
+// @amp-agent-mode {"key":"orc-proof-agent","label":"Orc proof","color":"#f97316"}
+
 import type {
 	AgentEndEvent,
 	PluginAPI,
@@ -78,6 +80,13 @@ export default async function (amp: PluginAPI) {
 		reasoningEffort: 'low',
 		features: [],
 		display: { label: 'Orc proof', color: '#f97316' },
+	})
+	amp.registerAgentMode({
+		key: 'orc-proof-agent',
+		label: 'Orc proof',
+		description: 'Restricted, harmless Development and QA orchestration proof agent',
+		color: '#f97316',
+		agent: proofAgent.definition,
 	})
 
 	amp.registerTool({
