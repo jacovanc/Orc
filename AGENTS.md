@@ -11,3 +11,5 @@ Orc assumes that each fresh Amp Orb already has the repository and GitHub access
 - Never expose Laravel↔trusted-controller signing secrets to a coding Orb. Coding workers use only a per-launch capability bound to one stage run, exact Amp thread, permitted outcomes, and current workflow state.
 
 Keep workflow authorization in Laravel: repository/operator allowlists, row locks, one active attempt, exact thread and stage binding, bounded outcomes, evidence identifiers, persistent event deduplication, cancellation, and stale/racing completion rejection.
+
+Self-registration must remain opt-in and disabled in production. Registration and Amp launch authority are separate: a new account must never acquire launch authority unless an operator separately adds its normalized email and target repository to the deployment allowlists.

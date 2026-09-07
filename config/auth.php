@@ -114,6 +114,9 @@ return [
 
     'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
-    'registration_enabled' => env('REGISTRATION_ENABLED', true),
+    // Self-registration is opt-in because authenticated users can create
+    // workflows. Amp launches still require separate operator/repository
+    // allowlists, but a missing deployment variable must fail closed here too.
+    'registration_enabled' => env('REGISTRATION_ENABLED', false),
 
 ];

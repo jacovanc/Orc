@@ -56,7 +56,7 @@ npm run build
 php artisan serve
 ```
 
-Create an account through `/register`, then start a workflow using a matching GitHub repository, issue number, and issue URL.
+Self-registration is disabled by default. For local-only evaluation, explicitly set `REGISTRATION_ENABLED=true`, create an account through `/register`, then start a workflow using a matching GitHub repository, issue number, and issue URL. Never enable public registration in a shared Amp-backed deployment; even when registration is enabled, only accounts and repositories in the Amp allowlists may launch work.
 
 For local asset development, run `npm run dev` alongside the Laravel server.
 
@@ -90,7 +90,7 @@ Deployment status and exact verification evidence are recorded in [IMPLEMENTATIO
 ## Current limitations
 
 - Workflow definition v1 retains the harmless Development/QA integration proof. Definition v2 adds real Development and keeps QA explicitly proof-only until Milestone 7.
-- Amp launches fail closed unless both the repository and initiating user are explicitly allowlisted. Production self-registration is disabled; account provisioning remains an operator action.
+- Self-registration is source-default-disabled and production returns 404 for `/register`. Amp launches independently fail closed unless both the repository and initiating user are explicitly allowlisted, so enabling registration alone cannot grant access to the owner's Amp account.
 - Agents retain normal Amp shell, editing, web, MCP, and other default tools. Orc adds workflow tools and enforces authority at Laravel's orchestration boundary rather than by suppressing tools.
 - A per-launch capability replaces broad callback credentials in fresh coding Orbs. It is bound to one attempt/thread and cannot grant repository access.
 - Reports use an unguessable per-launch nonce, native GitHub author checks, paginated reconciliation, and durable Laravel attestation before completion.

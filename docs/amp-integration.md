@@ -57,7 +57,7 @@ AMP_ALLOWED_USER_EMAILS=approved-operator@example.com
 REGISTRATION_ENABLED=false
 ```
 
-Both allowlists are mandatory and fail closed while integration is enabled. Repository matching is case-insensitive. The account allowlist prevents an authenticated Orc user from initiating work under the controller owner's native Amp identity. Keep production self-registration disabled and provision operators separately.
+Both allowlists are mandatory and fail closed while integration is enabled. Repository matching is case-insensitive. The account allowlist prevents an authenticated Orc user from initiating work under the controller owner's native Amp identity. Self-registration is source-default-disabled; keep `REGISTRATION_ENABLED=false` in production and provision operators separately. Enabling registration does not add an email to `AMP_ALLOWED_USER_EMAILS` and therefore cannot grant Amp launch authority by itself.
 
 Run a supervised queue worker:
 

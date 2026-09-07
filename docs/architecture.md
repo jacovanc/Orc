@@ -101,7 +101,7 @@ An explicit `workflow_complete` tool is the normal completion path. A guarded `a
 
 Cancellation closes the Laravel attempt first, transactionally preventing any late completion. When a thread is already bound, Laravel also queues a signed, retryable command to the trusted controller to call `thread.cancel()` on that exact thread. External GitHub or Git operations already in flight may still finish and must be inspected.
 
-When integration is enabled, workflow start fails closed unless both the normalized repository and initiating user's email are present in deployment-managed allowlists. This prevents public application users from directing the shared GitHub identity toward arbitrary accessible targets. Production registration is disabled independently of this authorization boundary.
+Self-registration is opt-in and source-default-disabled. Independently, when integration is enabled, workflow start fails closed unless both the normalized repository and initiating user's email are present in deployment-managed allowlists. This prevents a newly registered or otherwise unapproved application user from directing the owner's Amp/GitHub identity toward any target. Production registration is disabled, and a regression test proves that enabling registration alone does not grant launch authority.
 
 ## Current limitations
 
