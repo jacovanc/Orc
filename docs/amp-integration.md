@@ -57,7 +57,7 @@ AMP_ALLOWED_USER_EMAILS=approved-operator@example.com
 REGISTRATION_ENABLED=false
 ```
 
-Both allowlists are mandatory and fail closed while integration is enabled. Repository matching is case-insensitive. The account allowlist prevents an authenticated Orc user from initiating work under the controller owner's native Amp identity. Self-registration is source-default-disabled; keep `REGISTRATION_ENABLED=false` in production and provision operators separately. Enabling registration does not add an email to `AMP_ALLOWED_USER_EMAILS` and therefore cannot grant Amp launch authority by itself.
+Both allowlists are mandatory and fail closed while integration is enabled. Repository matching is case-insensitive. The account allowlist prevents an authenticated Orc user from initiating work under the controller owner's native Amp identity. Orc rechecks both allowlists when a human action would enter another agent stage, so removing an operator or repository revokes retry/request-changes launch authority as well as new-run authority. Self-registration is source-default-disabled; keep `REGISTRATION_ENABLED=false` in production and provision operators separately. Enabling registration does not add an email to `AMP_ALLOWED_USER_EMAILS` and therefore cannot grant Amp launch authority by itself.
 
 Run a supervised queue worker:
 
@@ -150,9 +150,9 @@ Those are orchestration proofs only. They did not validate code and must not be 
 Production `RUN-0017` live-proved Milestone 6 against user-authorized documentation issue <https://github.com/jacovanc/Orc/issues/2>:
 
 - Development thread: <https://ampcode.com/threads/T-01a08098-ff9f-7367-af7a-99f1a0091ce4>
-- Open, unmerged pull request: <https://github.com/jacovanc/Orc/pull/3>
+- Pull request left open by Orc and subsequently merged by the user: <https://github.com/jacovanc/Orc/pull/3>
 - Substantive Development report: <https://github.com/jacovanc/Orc/issues/2#issuecomment-5583912890>
 - Proof-only QA thread: <https://ampcode.com/threads/T-01a0809e-cbc1-767a-8ca5-2396c88216c5>
 - Proof-only QA report: <https://github.com/jacovanc/Orc/issues/2#issuecomment-5583925014>
 
-The two completed agent attempts used distinct sandbox executors and each required exactly one delivered launch. QA completed only `proof_complete`; Laravel stopped at Human Review and neither Orc nor either agent merged or approved the pull request. Public-repository operation is proven; private-repository access is not claimed.
+The two completed agent attempts used distinct sandbox executors and each required exactly one delivered launch. QA completed only `proof_complete`; Laravel stopped at Human Review and neither Orc nor either agent merged or approved the pull request. The user later merged PR #3 directly on GitHub while the Orc run remained at Human Review. Public-repository operation is proven; private-repository access is not claimed.
