@@ -47,15 +47,21 @@ async function controllerHarness(testName: string, holdResponses = false) {
 	let createThreadCalls = 0
 	let cancelled = 0
 	let prompted = 0
+	let monitorWaiting = false
+	let monitorWasWaitingWhenPrompted = false
 	let agentEndHandler: ((event: Record<string, any>) => Promise<unknown>) | undefined
 	const thread = {
 		id: 'T-00000000-0000-0000-0000-000000000041',
 		cancel: async () => { cancelled++ },
-		appendUserMessage: async () => { prompted++ },
+		appendUserMessage: async () => {
+			monitorWasWaitingWhenPrompted = monitorWaiting
+			prompted++
+		},
 		messages: async () => [],
-		waitForResponse: async () => holdResponses
-			? await new Promise<never>(() => undefined)
-			: undefined,
+		waitForResponse: async () => {
+			monitorWaiting = true
+			return holdResponses ? await new Promise<never>(() => undefined) : undefined
+		},
 	}
 	controller({
 		system: { workspaceRoot: `file://${root}` },
@@ -102,6 +108,7 @@ async function controllerHarness(testName: string, holdResponses = false) {
 			})
 		},
 		counts: () => ({ createThreadCalls, cancelled, prompted }),
+		monitorWasWaitingWhenPrompted: () => monitorWasWaitingWhenPrompted,
 		invokeAgentEnd: async (status: string) => {
 			if (!agentEndHandler) throw new Error('Controller did not register agent.end.')
 			return agentEndHandler({ thread: { id: thread.id }, status })
@@ -177,7 +184,7 @@ describe('Orc controller agent configuration', () => {
 
 	test('marks a claimed launch without a durable thread ambiguous instead of creating a duplicate Orb', async () => {
 		const harness = await controllerHarness('claimed-without-thread')
-		expect(harness.webhookKey()).toBe('orc-stage-launch-v5')
+		expect(harness.webhookKey()).toBe('orc-stage-launch-v6')
 		const callbackTypes: string[] = []
 		globalThis.fetch = (async (_input, init) => {
 			const payload = JSON.parse(String(init?.body))
@@ -225,6 +232,7 @@ describe('Orc controller agent configuration', () => {
 		expect(result.action).toBe('continue')
 		expect(result.userMessage).toContain('Safety check')
 		expect(harness.counts()).toEqual({ createThreadCalls: 0, cancelled: 0, prompted: 1 })
+		expect(harness.monitorWasWaitingWhenPrompted()).toBeTrue()
 		rmSync(harness.root, { recursive: true, force: true })
 	})
 

@@ -146,7 +146,7 @@ export default function (amp: PluginAPI) {
 	void amp.createWebhook({
 		// Version the durable registration whenever launch behavior changes because
 		// an existing capability can retain its previously loaded handler.
-		key: 'orc-stage-launch-v5',
+		key: 'orc-stage-launch-v6',
 		headers: ['idempotency-key', 'x-orc-event-id', 'x-orc-timestamp', 'x-orc-signature'],
 		handler: async (event, ctx) => handleLaunch(event, ctx, config, proofAgent, developmentAgent, qaAgent, amp),
 	}).then((registration) => {
@@ -325,12 +325,15 @@ async function acknowledgeAndPrompt(
 			capability,
 		].join('\n')
 
+	// Subscribe before prompting. A short agent response can otherwise finish
+	// between appendUserMessage and waitForResponse, leaving the monitor waiting
+	// for a response that already happened.
+	monitorThread(thread, context, config)
 	await thread.appendUserMessage({
 		type: 'user-message',
 		content: stagePrompt,
 	})
 	context.prompt_appended = true
-	monitorThread(thread, context, config)
 }
 
 function monitorThread(thread: PluginThread, context: LaunchPayload, config: RuntimeConfig) {
