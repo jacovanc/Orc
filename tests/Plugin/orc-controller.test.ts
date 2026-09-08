@@ -17,7 +17,7 @@ function launch(overrides: Record<string, unknown> = {}) {
 		project_id: 1,
 		connection_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		amp_project_id: 'amp-project-test',
-		controller_key: 'orc-stage-launch-v8',
+		controller_key: 'orc-stage-launch-v9',
 		callback_url: 'https://orc.test/api/integrations/amp/connections/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		event_id: '11111111-1111-4111-8111-111111111111',
 		idempotency_key: '22222222-2222-4222-8222-222222222222',
@@ -55,6 +55,7 @@ async function controllerHarness(testName: string, holdResponses = false) {
 	let webhookKey: string | undefined
 	let createThreadCalls = 0
 	let createThreadError: Error | undefined
+	let createThreadOptions: Record<string, unknown> | undefined
 	let cancelled = 0
 	let prompted = 0
 	let monitorWaiting = false
@@ -78,8 +79,9 @@ async function controllerHarness(testName: string, holdResponses = false) {
 		helpers: { filePathFromURI: () => root },
 		createAgent: (config: Record<string, any>) => ({
 			definition: config,
-			createThread: async () => {
+			createThread: async (options: Record<string, unknown>) => {
 				createThreadCalls++
+				createThreadOptions = options
 				if (createThreadError) throw createThreadError
 				return thread
 			},
@@ -122,6 +124,7 @@ async function controllerHarness(testName: string, holdResponses = false) {
 			})
 		},
 		counts: () => ({ createThreadCalls, cancelled, prompted }),
+		createThreadOptions: () => createThreadOptions,
 		failCreateThread: (error: Error) => { createThreadError = error },
 		monitorWasWaitingWhenPrompted: () => monitorWasWaitingWhenPrompted,
 		invokeAgentEnd: async (status: string) => {
@@ -202,7 +205,7 @@ describe('Orc controller agent configuration', () => {
 
 	test('marks a claimed launch without a durable thread ambiguous instead of creating a duplicate Orb', async () => {
 		const harness = await controllerHarness('claimed-without-thread')
-		expect(harness.webhookKey()).toBe('orc-stage-launch-v8')
+		expect(harness.webhookKey()).toBe('orc-stage-launch-v9')
 		const callbackTypes: string[] = []
 		globalThis.fetch = (async (_input, init) => {
 			const payload = JSON.parse(String(init?.body))
@@ -246,6 +249,8 @@ describe('Orc controller agent configuration', () => {
 
 		expect(actions).toEqual(['claim', 'failed'])
 		expect(harness.counts()).toEqual({ createThreadCalls: 1, cancelled: 0, prompted: 0 })
+		expect(harness.createThreadOptions()?.parentThreadID).toBeUndefined()
+		expect(harness.createThreadOptions()?.executor).toBe('orb')
 		rmSync(harness.root, { recursive: true, force: true })
 	})
 

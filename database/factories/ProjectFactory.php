@@ -33,7 +33,7 @@ class ProjectFactory extends Factory
                 'public_id' => (string) Str::uuid(),
                 'version' => 1,
                 'amp_project_id' => $project->amp_project_id,
-                'controller_key' => 'orc-stage-launch-v8',
+                'controller_key' => 'orc-stage-launch-v9',
                 'launch_webhook_url' => $webhook,
                 'launch_signing_secret' => 'launch-test-secret-that-is-at-least-32-bytes',
                 'callback_signing_secret' => 'callback-test-secret-that-is-at-least-32-bytes',

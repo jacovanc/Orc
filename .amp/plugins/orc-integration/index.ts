@@ -158,7 +158,7 @@ export default function (amp: PluginAPI) {
 	void amp.createWebhook({
 		// Version the durable registration whenever launch behavior changes because
 		// an existing capability can retain its previously loaded handler.
-		key: 'orc-stage-launch-v8',
+		key: 'orc-stage-launch-v9',
 		headers: ['idempotency-key', 'x-orc-event-id', 'x-orc-timestamp', 'x-orc-signature'],
 		handler: async (event, ctx) => handleLaunch(event, ctx, config, proofAgent, developmentAgent, qaAgent, verificationAgent, amp),
 	}).then((registration) => {
@@ -191,7 +191,7 @@ async function handleLaunch(
 	verifyLaunchSignature(body, eventId, timestamp, signature, config.launchSigningSecret)
 	const envelope = JSON.parse(body) as Record<string, unknown>
 	if (envelope.command === 'verify_connection') {
-		await handleConnectionVerification(envelope, config, verificationAgent, ctx.thread.id, ctx.signal)
+		await handleConnectionVerification(envelope, config, verificationAgent, ctx.signal)
 		return
 	}
 	assertControllerBinding(envelope, config)
@@ -250,7 +250,6 @@ async function handleLaunch(
 	let thread
 	try {
 		thread = await agent.createThread({
-			parentThreadID: ctx.thread.id,
 			executor: 'orb',
 			visibility: 'private',
 			multiplayerTTLSeconds: null,
@@ -614,7 +613,6 @@ async function handleConnectionVerification(
 	envelope: Record<string, unknown>,
 	config: RuntimeConfig,
 	verificationAgent: ReturnType<PluginAPI['createAgent']>,
-	controllerThreadId: string,
 	signal?: AbortSignal,
 ) {
 	assertControllerBinding(envelope, config)
@@ -642,7 +640,6 @@ async function handleConnectionVerification(
 	let thread: PluginThread | undefined
 	try {
 		thread = await verificationAgent.createThread({
-			parentThreadID: controllerThreadId as `T-${string}`,
 			executor: 'orb',
 			visibility: 'private',
 			multiplayerTTLSeconds: null,

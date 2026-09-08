@@ -32,7 +32,7 @@ class AmpProjectConnectionService
                 'public_id' => (string) Str::uuid(),
                 'version' => $version,
                 'amp_project_id' => $attributes['amp_project_id'],
-                'controller_key' => 'orc-stage-launch-v8',
+                'controller_key' => 'orc-stage-launch-v9',
                 'launch_webhook_url' => trim($attributes['launch_webhook_url']),
                 'launch_signing_secret' => $attributes['launch_signing_secret'],
                 'callback_signing_secret' => $attributes['callback_signing_secret'],
