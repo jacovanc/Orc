@@ -30,12 +30,11 @@
 
     <section class="panel mt-8 p-6 sm:p-8">
         <h2 class="text-lg font-semibold text-white">Add a project</h2>
-        <p class="mt-2 text-sm text-zinc-500">The Amp project must already exist and have user-configured native access to this repository.</p>
-        <form method="POST" action="{{ route('projects.store') }}" class="mt-6 grid gap-5 lg:grid-cols-[1fr_1.2fr_1.2fr_auto] lg:items-end">
+        <p class="mt-2 text-sm text-zinc-500">Create the Project from its repository, then paste Orc’s setup prompt into the Amp project you want to link. That Amp project must already have user-configured native repository access.</p>
+        <form method="POST" action="{{ route('projects.store') }}" class="mt-6 grid gap-5 lg:grid-cols-[1fr_1.5fr_auto] lg:items-end">
             @csrf
             <div><label class="field-label" for="name">Name</label><input class="field-input" id="name" name="name" value="{{ old('name') }}" required></div>
             <div><label class="field-label" for="github_repository">GitHub repository</label><input class="field-input" id="github_repository" name="github_repository" placeholder="owner/repository" value="{{ old('github_repository') }}" required></div>
-            <div><label class="field-label" for="amp_project_id">Amp project ID</label><input class="field-input font-mono" id="amp_project_id" name="amp_project_id" value="{{ old('amp_project_id') }}" required></div>
             <button class="button-primary" type="submit">Create</button>
         </form>
     </section>

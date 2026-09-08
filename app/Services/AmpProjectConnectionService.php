@@ -31,6 +31,9 @@ class AmpProjectConnectionService
 
         return DB::transaction(function () use ($project) {
             $lockedProject = Project::query()->lockForUpdate()->findOrFail($project->id);
+            if ($lockedProject->amp_project_id === null && $lockedProject->connections()->whereNotNull('amp_project_id')->exists()) {
+                throw new WorkflowConflict('This Project has inconsistent Amp identity history and cannot issue setup safely.');
+            }
             AmpConnectionSetup::query()
                 ->whereHas('connection', fn ($query) => $query->where('project_id', $lockedProject->id))
                 ->whereIn('status', ['pending', 'claimed'])
@@ -92,10 +95,12 @@ class AmpProjectConnectionService
 
         return DB::transaction(function () use ($token, $payload, $source, $sourceHash) {
             $setup = $this->lockedSetup($token, $payload['setup_id']);
-            $connection = $setup->connection()->with('project')->firstOrFail();
-            $this->assertSetupIdentity($setup, $connection, $payload);
+            $connection = $setup->connection()->with('project.user')->firstOrFail();
+            $this->assertCanManage($connection->project, $connection->project->user);
 
             if ($setup->status === 'completed') {
+                $this->assertSetupIdentity($setup, $connection, $payload);
+
                 return ['accepted' => true, 'disposition' => 'already_completed', 'verification_status' => $connection->status];
             }
             if ($setup->status === 'revoked') {
@@ -108,6 +113,8 @@ class AmpProjectConnectionService
             if ($setup->claimed_thread_id && $setup->claimed_thread_id !== $payload['thread_id']) {
                 throw new WorkflowConflict('This project setup capability is already bound to another Amp thread.');
             }
+            $this->bindSetupIdentity($connection, $payload['amp_project_id']);
+            $this->assertSetupIdentity($setup, $connection, $payload);
 
             $setup->forceFill([
                 'status' => 'claimed',
@@ -439,6 +446,24 @@ class AmpProjectConnectionService
             || ($setup->claimed_thread_id && $setup->claimed_thread_id !== $payload['thread_id'])
         ) {
             throw new WorkflowConflict('This setup prompt belongs to a different Amp project or thread.');
+        }
+    }
+
+    private function bindSetupIdentity(AmpProjectConnection $connection, string $ampProjectId): void
+    {
+        if ($connection->amp_project_id !== null) {
+            return;
+        }
+        if ($connection->project->amp_project_id !== null && $connection->project->amp_project_id !== $ampProjectId) {
+            throw new WorkflowConflict('This setup prompt belongs to a different Amp project.');
+        }
+
+        $connection->forceFill(['amp_project_id' => $ampProjectId])->save();
+        if ($connection->project->amp_project_id === null) {
+            if ($connection->project->connections()->whereKeyNot($connection->id)->whereNotNull('amp_project_id')->exists()) {
+                throw new WorkflowConflict('This setup cannot change an existing Project Amp identity.');
+            }
+            $connection->project->forceFill(['amp_project_id' => $ampProjectId])->save();
         }
     }
 }

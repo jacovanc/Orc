@@ -33,13 +33,14 @@ class ProjectSetupTest extends TestCase
         $response = $this->actingAs($this->owner)->post(route('projects.store'), [
             'name' => 'Widgets',
             'github_repository' => 'Acme/Widgets',
-            'amp_project_id' => 'amp-project-one',
         ]);
 
         $project = Project::query()->with('currentConnection.setups')->sole();
         $setup = $project->currentConnection->setups->sole();
         $response->assertRedirect(route('projects.settings', $project));
         $this->assertSame('acme/widgets', $project->github_repository);
+        $this->assertNull($project->amp_project_id);
+        $this->assertNull($project->currentConnection->amp_project_id);
         $this->assertSame('setup_pending', $project->currentConnection->status);
         $this->assertSame(
             'orc-stage-launch-v11-'.$project->currentConnection->public_id,
@@ -50,14 +51,48 @@ class ProjectSetupTest extends TestCase
         $this->assertNotSame($setup->token, $raw->token);
 
         $this->actingAs($this->owner)
+            ->get(route('projects.index'))
+            ->assertOk()
+            ->assertSee('paste Orc’s setup prompt into the Amp project you want to link')
+            ->assertDontSee('Amp project ID');
+
+        $this->actingAs($this->owner)
             ->get(route('projects.settings', $project))
             ->assertOk()
             ->assertSee('Copy setup prompt')
             ->assertSee('orc_setup_project')
             ->assertSee($setup->public_id)
-            ->assertSee('No webhook URL or signing secret needs to be copied by hand.')
+            ->assertSee('no ID, webhook URL, or signing secret needs to be copied by hand')
             ->assertDontSee('launch_signing_secret', false)
             ->assertDontSee('github_feedback_confirmed', false);
+    }
+
+    public function test_first_setup_claim_binds_actual_amp_project_identity_atomically(): void
+    {
+        $project = Project::factory()->for($this->owner)->create(['amp_project_id' => null]);
+        ['connection' => $connection, 'setup' => $setup] = app(AmpProjectConnectionService::class)
+            ->issueSetup($project, $this->owner);
+
+        $this->withToken($setup->token)->postJson('/api/integrations/amp/project-setup', [
+            'schema_version' => 1,
+            'action' => 'claim',
+            'setup_id' => $setup->public_id,
+            'thread_id' => 'T-'.str_repeat('9', 36),
+            'amp_project_id' => 'actual-amp-project',
+        ])->assertOk()
+            ->assertJsonPath('amp_project_id', 'actual-amp-project');
+
+        $this->assertSame('actual-amp-project', $project->fresh()->amp_project_id);
+        $this->assertSame('actual-amp-project', $connection->fresh()->amp_project_id);
+
+        $this->withToken($setup->token)->postJson('/api/integrations/amp/project-setup', [
+            'schema_version' => 1,
+            'action' => 'claim',
+            'setup_id' => $setup->public_id,
+            'thread_id' => 'T-'.str_repeat('9', 36),
+            'amp_project_id' => 'different-amp-project',
+        ])->assertConflict();
+        $this->assertSame('actual-amp-project', $project->fresh()->amp_project_id);
     }
 
     public function test_setup_claim_is_project_and_thread_bound_and_completion_queues_verification_once(): void
@@ -183,6 +218,26 @@ class ProjectSetupTest extends TestCase
         $this->assertSame('claimed', $setup->fresh()->status);
         $this->assertSame('setup_pending', $project->currentConnection->fresh()->status);
         Queue::assertNotPushed(VerifyAmpProjectConnection::class);
+    }
+
+    public function test_revoked_operator_cannot_claim_or_bind_an_unclaimed_setup(): void
+    {
+        $project = Project::factory()->for($this->owner)->create(['amp_project_id' => null]);
+        ['connection' => $connection, 'setup' => $setup] = app(AmpProjectConnectionService::class)
+            ->issueSetup($project, $this->owner);
+        $this->owner->update(['can_trigger_amp' => false]);
+
+        $this->withToken($setup->token)->postJson('/api/integrations/amp/project-setup', [
+            'schema_version' => 1,
+            'action' => 'claim',
+            'setup_id' => $setup->public_id,
+            'thread_id' => 'T-'.str_repeat('8', 36),
+            'amp_project_id' => 'must-not-bind',
+        ])->assertConflict();
+
+        $this->assertNull($project->fresh()->amp_project_id);
+        $this->assertNull($connection->fresh()->amp_project_id);
+        $this->assertSame('pending', $setup->fresh()->status);
     }
 
     public function test_settings_truthfully_render_claimed_expired_failed_and_verified_states(): void

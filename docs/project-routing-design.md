@@ -4,8 +4,8 @@ Status: designed before coding and implemented on 2026-09-08. This phase follows
 
 ## Domain
 
-- `Project` is an authenticated user's personal delivery boundary. It has a display name, one canonical normalized GitHub `owner/name`, the expected Amp project ID, and one current connection version.
-- `AmpProjectConnection` is an immutable versioned routing configuration for one Project. It stores a public connection ID, expected Amp project ID, controller registration key, encrypted durable webhook URL, encrypted independent launch/callback signing secrets, status, and verification evidence.
+- `Project` is an authenticated user's personal delivery boundary. It has a display name, one canonical normalized GitHub `owner/name`, an Amp project ID discovered during setup, and one current connection version.
+- `AmpProjectConnection` is an immutable versioned routing configuration for one Project. It preallocates a public connection ID and connection-scoped controller registration key; its Amp project ID starts empty for a new Project and is atomically bound from the first valid setup claim. It also stores the encrypted durable webhook URL, encrypted independent launch/callback signing secrets, status, and verification evidence.
 - `WorkflowRun` snapshots both `project_id` and `amp_project_connection_id`. Every later Development retry, QA attempt, reconciliation, and cancellation uses those original identifiers even if Project settings create a newer connection version.
 - `AmpLaunch` also snapshots the connection ID. Queue jobs never select a mutable global endpoint.
 - `AmpConnectionSetup` is a short-lived, revocable pairing capability for one preallocated connection. First claim binds it to the exact expected Amp project and setup thread; completion accepts only the pinned controller digest and SSRF-guarded webhook.
@@ -15,7 +15,7 @@ Existing runs are grouped into personal Projects by their existing owner and can
 
 ## Routing and verification
 
-Amp's installed Plugin API exposes no `project` selector on `Agent.createThread`. Orc therefore never claims to route by fetching another repository. A launch goes only to the durable webhook registered by a controller running inside the selected Amp project. The project-scoped controller calls unparented `createThread({ executor: "orb" })` so its own child-thread capacity cannot block the workflow; Laravel still refuses to verify or run the connection until the fresh Orb reports the exact expected `AMP_PROJECT_ID`.
+Amp's installed Plugin API exposes no `project` selector on `Agent.createThread`. Orc therefore never claims to route by fetching another repository. A launch goes only to the durable webhook registered by a controller running inside the selected Amp project. The setup agent supplies that project's actual `AMP_PROJECT_ID`; Laravel binds it once under a row lock and rejects later project/thread mismatches. The project-scoped controller calls unparented `createThread({ executor: "orb" })`; Laravel refuses to verify or run the connection until the fresh Orb reports the exact bound identity.
 
 The controller compares the connection ID and expected project ID in the signed launch with its owner-only runtime configuration and with the runtime's actual `AMP_PROJECT_ID`. Every worker tool call also carries the child's actual `AMP_PROJECT_ID`, added by worker code rather than model input, and Laravel requires it to match the run's bound connection.
 

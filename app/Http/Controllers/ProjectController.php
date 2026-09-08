@@ -32,7 +32,6 @@ class ProjectController extends Controller
         abort_unless($request->user()->can_trigger_amp, 403);
         $request->merge([
             'github_repository' => strtolower(trim((string) $request->input('github_repository'), ' /')),
-            'amp_project_id' => trim((string) $request->input('amp_project_id')),
         ]);
         $data = $request->validate([
             'name' => ['required', 'string', 'max:100'],
@@ -43,7 +42,6 @@ class ProjectController extends Controller
                 'regex:/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/',
                 Rule::unique('projects')->where('user_id', $request->user()->id),
             ],
-            'amp_project_id' => ['required', 'string', 'max:100', 'regex:/^[A-Za-z0-9_-]+$/'],
         ]);
         $project = DB::transaction(function () use ($request, $data) {
             $project = $request->user()->projects()->create($data);
@@ -52,7 +50,7 @@ class ProjectController extends Controller
             return $project;
         }, 3);
 
-        return to_route('projects.settings', $project)->with('status', 'Project created. Copy its setup prompt to an agent in the matching Amp project.');
+        return to_route('projects.settings', $project)->with('status', 'Project created. Copy its setup prompt to an agent in the Amp project you want to link.');
     }
 
     public function show(Request $request, Project $project): View

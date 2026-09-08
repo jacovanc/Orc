@@ -37,7 +37,7 @@ One execution of a frozen definition for a GitHub repository and issue. It snaps
 
 ### Project and AmpProjectConnection
 
-`Project` is one user's personal boundary for a canonical GitHub repository and explicit Amp project identity. `AmpProjectConnection` is an immutable numbered controller configuration with an encrypted durable webhook URL, encrypted directional secrets, status, and fresh-Orb verification evidence. `createThread` has no project selector, so correct placement comes from sending the launch to a controller registered inside the selected Amp project—not from fetching a repository in some other project.
+`Project` is one user's personal boundary for a canonical GitHub repository. Its Amp project identity is not user-entered: the first valid setup claim binds the actual `AMP_PROJECT_ID` under a row lock. `AmpProjectConnection` is an immutable numbered controller configuration with a connection-scoped webhook key, encrypted durable webhook URL, encrypted directional secrets, status, and fresh-Orb verification evidence. `createThread` has no project selector, so correct placement comes from sending the launch to a controller registered inside the selected Amp project—not from fetching a repository in some other project.
 
 ### StageRun
 

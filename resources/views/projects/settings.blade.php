@@ -16,7 +16,7 @@
             <h2 class="font-semibold text-white">Current binding</h2>
             <dl class="mt-6 grid gap-5 sm:grid-cols-2">
                 <div><dt class="field-label">Canonical repository</dt><dd class="font-mono text-sm text-zinc-300">{{ $project->github_repository }}</dd></div>
-                <div><dt class="field-label">Amp project identity</dt><dd class="font-mono text-sm text-zinc-300">{{ $connection?->amp_project_id ?? $project->amp_project_id }}</dd></div>
+                <div><dt class="field-label">Amp project identity</dt><dd class="font-mono text-sm text-zinc-300">{{ $connection?->amp_project_id ?? $project->amp_project_id ?? 'Discovered when setup is claimed' }}</dd></div>
                 <div><dt class="field-label">Connection ID</dt><dd class="break-all font-mono text-sm text-zinc-300">{{ $connection?->public_id ?? 'Not configured' }}</dd></div>
                 <div><dt class="field-label">Version</dt><dd class="text-sm text-zinc-300">{{ $connection ? 'v'.$connection->version : '—' }}</dd></div>
                 @if ($connection?->verification_thread_id)<div class="sm:col-span-2"><dt class="field-label">Verification thread</dt><dd><a class="font-mono text-sm text-orange-300" target="_blank" rel="noopener" href="https://ampcode.com/threads/{{ $connection->verification_thread_id }}">{{ $connection->verification_thread_id }} ↗</a></dd></div>@endif
@@ -29,7 +29,7 @@
 
         <section class="panel mt-8 p-6 sm:p-8">
             <div class="flex flex-wrap items-start justify-between gap-5">
-                <div><h2 class="font-semibold text-white">Agent-assisted setup</h2><p class="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Copy this prompt into an already-authenticated agent in <strong class="text-zinc-300">{{ $project->amp_project_id }}</strong>. No webhook URL or signing secret needs to be copied by hand.</p></div>
+                <div><h2 class="font-semibold text-white">Agent-assisted setup</h2><p class="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Copy this prompt into an already-authenticated agent in the Amp project you want to link. Orc binds the identity reported by that project on first claim; no ID, webhook URL, or signing secret needs to be copied by hand.</p></div>
                 @if ($setup)<span class="status-pill status-{{ $setup->displayStatus() }}">setup {{ $setup->displayStatus() }}</span>@endif
             </div>
 
@@ -38,7 +38,7 @@
                     <textarea id="amp-setup-prompt" class="field-input min-h-[32rem] resize-y font-mono text-xs leading-5" readonly>{{ $setupPrompt }}</textarea>
                     <div class="mt-4 flex flex-wrap items-center gap-4">
                         <button class="button-primary" type="button" @click="navigator.clipboard.writeText(document.getElementById('amp-setup-prompt').value); copied = true; setTimeout(() => copied = false, 1800)"><span x-text="copied ? 'Copied' : 'Copy setup prompt'">Copy setup prompt</span></button>
-                        <span class="text-xs text-zinc-600">Expires {{ $setup->expires_at->diffForHumans() }} · single connection and Amp project only</span>
+                        <span class="text-xs text-zinc-600">Expires {{ $setup->expires_at->diffForHumans() }} · single connection, thread, and Amp project only</span>
                     </div>
                     @if ($setup->status === 'claimed')
                         <p class="mt-4 rounded-xl border border-sky-300/15 bg-sky-300/[0.04] p-4 text-xs leading-5 text-sky-100/70">The setup agent claimed this prompt. If it asks for a plugin reload, run <strong class="text-sky-100">plugins: reload</strong> in that same Amp thread, then tell it to continue.</p>
@@ -58,7 +58,7 @@
         </section>
 
         <section class="mt-8 rounded-2xl border border-sky-300/15 bg-sky-300/[0.04] p-6 text-sm leading-6 text-sky-100/70">
-            <strong class="text-sky-100">Placement matters.</strong> Install/reload the controller from inside the chosen Amp project; <code>createThread</code> has no project selector. Verification accepts only a fresh child reporting this exact Amp project identity and native read access to <code>{{ $project->github_repository }}</code>. Orc does not copy or repair GitHub credentials.
+            <strong class="text-sky-100">Placement matters.</strong> Install/reload the controller from inside the chosen Amp project; <code>createThread</code> has no project selector. The first setup claim binds that actual Amp project identity, and verification accepts only a fresh Orb reporting the same identity and native read access to <code>{{ $project->github_repository }}</code>. Orc does not copy or repair GitHub credentials.
         </section>
     </div>
 </x-app-layout>
