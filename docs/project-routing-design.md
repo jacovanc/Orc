@@ -10,7 +10,7 @@ Status: designed before coding and implemented on 2026-09-08. This phase follows
 - `AmpLaunch` also snapshots the connection ID. Queue jobs never select a mutable global endpoint.
 - `User.can_trigger_amp` is the explicit immutable account permission. Email is profile data, not authority. Existing operators are migrated once; changing an email never grants execution authority and registrations default to false.
 
-Existing runs are grouped into personal Projects by their existing owner and canonical repository. The existing controller configuration becomes connection version 1. Historical run, attempt, event, report, thread, and launch identifiers are preserved.
+Existing runs are grouped into personal Projects by their existing owner and canonical repository. The existing controller configuration becomes connection version 1. Historical run, attempt, event, report, thread, and launch identifiers are preserved. Only accounts on the deployment's legacy operator allowlist receive the one-time permission migration; merely owning historical or synthetic proof runs does not grant launch authority.
 
 ## Routing and verification
 

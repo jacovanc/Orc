@@ -64,6 +64,33 @@ class ProjectRoutingTest extends TestCase
         $this->assertDatabaseCount('projects', 0);
     }
 
+    public function test_historical_run_ownership_does_not_restore_revoked_launch_permission(): void
+    {
+        $project = Project::factory()->for($this->owner)->configured()->create([
+            'github_repository' => 'acme/historical',
+        ]);
+        $definition = WorkflowDefinition::query()->where('version', 3)->sole();
+        app(WorkflowEngine::class)->start(
+            $this->owner,
+            $definition,
+            $project,
+            1,
+            'https://github.com/acme/historical/issues/1',
+        );
+        $this->owner->update(['can_trigger_amp' => false]);
+
+        $this->actingAs($this->owner)->from(route('projects.show', $project))->post(route('projects.workflows.store', $project), [
+            'workflow_definition_id' => $definition->id,
+            'github_issue_number' => 2,
+            'github_issue_url' => 'https://github.com/acme/historical/issues/2',
+        ])->assertRedirect(route('projects.show', $project))
+            ->assertSessionHasErrors('workflow');
+
+        $this->assertDatabaseCount('workflow_runs', 1);
+        $this->assertDatabaseCount('amp_launches', 1);
+        Queue::assertPushed(DeliverAmpLaunch::class, 1);
+    }
+
     public function test_two_projects_run_concurrently_on_their_own_snapshotted_connections(): void
     {
         $first = Project::factory()->for($this->owner)->configured()->create([

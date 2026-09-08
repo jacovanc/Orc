@@ -85,9 +85,6 @@ return new class extends Migration
         DB::table('users')
             ->whereIn(DB::raw('LOWER(email)'), $allowedEmails->all())
             ->update(['can_trigger_amp' => true]);
-        DB::table('users')
-            ->whereIn('id', DB::table('workflow_runs')->select('user_id')->distinct())
-            ->update(['can_trigger_amp' => true]);
 
         $legacyAmpProjectId = (string) config('services.amp.project_identity', 'legacy-unverified');
         $legacyUrl = (string) config('services.amp.launch_webhook_url', '');
