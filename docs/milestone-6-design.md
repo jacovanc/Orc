@@ -136,4 +136,4 @@ On 2026-09-08, user-authorized documentation issue `jacovanc/Orc#2` exercised wo
 
 The Development Orb initially inherited the Amp-hosted project remote and an obsolete empty base. It detected the mismatch, fetched GitHub `main`, rebased its documentation commit, pushed only the corrected branch to GitHub, and then created the PR. The controller instructions now require target checkout/default-branch verification before editing so later attempts avoid that recovery path. This public-repository acceptance does not prove private-repository access.
 
-Orc and its agents left PR #3 open as required. The user subsequently merged it directly on GitHub; that external merge did not implicitly approve the Orc workflow, which remained at Human Review.
+Orc and its agents left PR #3 open as required. The user subsequently merged it directly on GitHub; that external merge did not implicitly approve the Orc workflow. The user then separately approved Human Review, completing `RUN-0017` at Done.

@@ -155,4 +155,4 @@ Production `RUN-0017` live-proved Milestone 6 against user-authorized documentat
 - Proof-only QA thread: <https://ampcode.com/threads/T-01a0809e-cbc1-767a-8ca5-2396c88216c5>
 - Proof-only QA report: <https://github.com/jacovanc/Orc/issues/2#issuecomment-5583925014>
 
-The two completed agent attempts used distinct sandbox executors and each required exactly one delivered launch. QA completed only `proof_complete`; Laravel stopped at Human Review and neither Orc nor either agent merged or approved the pull request. The user later merged PR #3 directly on GitHub while the Orc run remained at Human Review. Public-repository operation is proven; private-repository access is not claimed.
+The two completed agent attempts used distinct sandbox executors and each required exactly one delivered launch. QA completed only `proof_complete`; Laravel stopped at Human Review and neither Orc nor either agent merged or approved the pull request. The user later merged PR #3 directly on GitHub and separately approved the Orc Human Review, completing `RUN-0017` at Done. Public-repository operation is proven; private-repository access is not claimed.
