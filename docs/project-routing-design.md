@@ -14,7 +14,7 @@ Existing runs are grouped into personal Projects by their existing owner and can
 
 ## Routing and verification
 
-Amp's installed Plugin API exposes no `project` selector on `Agent.createThread`. Orc therefore never claims to route by fetching another repository. A launch goes only to the durable webhook registered by a controller running inside the selected Amp project. `createThread({ executor: "orb", parentThreadID })` then creates the child from that project-scoped controller.
+Amp's installed Plugin API exposes no `project` selector on `Agent.createThread`. Orc therefore never claims to route by fetching another repository. A launch goes only to the durable webhook registered by a controller running inside the selected Amp project. The project-scoped controller calls unparented `createThread({ executor: "orb" })` so its own child-thread capacity cannot block the workflow; Laravel still refuses to verify or run the connection until the fresh Orb reports the exact expected `AMP_PROJECT_ID`.
 
 The controller compares the connection ID and expected project ID in the signed launch with its owner-only runtime configuration and with the runtime's actual `AMP_PROJECT_ID`. Every worker tool call also carries the child's actual `AMP_PROJECT_ID`, added by worker code rather than model input, and Laravel requires it to match the run's bound connection.
 

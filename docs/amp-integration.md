@@ -126,7 +126,7 @@ Cancellation first closes Laravel's active slot and launch under locks, so late 
 - A non-retryable launch response while pending fails the launch, attempt, and workflow without a transition.
 - Retryable transport failures use the same canonical body and keys. A persisted claim is redelivered for recovery rather than silently marked delivered.
 - Exhausted unknown transport outcomes become `ambiguous`; Orc never blindly creates another Orb.
-- `createThread` uncertainty and claim-without-thread are ambiguous and require manual inspection/cancellation.
+- A definite controller-side `createThread` failure is reported and fails closed without retrying an Orb. Uncertainty after a claim but before any durable thread binding remains ambiguous and requires manual inspection/cancellation.
 - Prompt append is transcript-marker idempotent; report publication is persistent-claim/nonce idempotent.
 - Exact callback event replay returns its stored response; reuse with another payload is rejected.
 - Foreign-thread, wrong-mode, stale, cancelled, and racing callbacks cannot mutate the run.
