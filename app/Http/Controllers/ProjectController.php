@@ -7,6 +7,7 @@ use App\Models\Project;
 use App\Services\AmpProjectConnectionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
@@ -44,9 +45,14 @@ class ProjectController extends Controller
             ],
             'amp_project_id' => ['required', 'string', 'max:100', 'regex:/^[A-Za-z0-9_-]+$/'],
         ]);
-        $project = $request->user()->projects()->create($data);
+        $project = DB::transaction(function () use ($request, $data) {
+            $project = $request->user()->projects()->create($data);
+            $this->connections->issueSetup($project, $request->user());
 
-        return to_route('projects.settings', $project)->with('status', 'Project created. Connect its Amp project before starting a live run.');
+            return $project;
+        }, 3);
+
+        return to_route('projects.settings', $project)->with('status', 'Project created. Copy its setup prompt to an agent in the matching Amp project.');
     }
 
     public function show(Request $request, Project $project): View
@@ -64,9 +70,26 @@ class ProjectController extends Controller
     public function settings(Request $request, Project $project): View
     {
         $this->assertOwner($request, $project);
-        $project->load(['currentConnection', 'connections']);
+        $project->load(['currentConnection.setups', 'connections']);
+        $setup = $project->currentConnection?->setups->sortByDesc('id')->first();
+        $setupPrompt = $setup && in_array($setup->status, ['pending', 'claimed'], true) && ! $setup->isExpired()
+            ? $this->connections->setupPrompt($setup)
+            : null;
 
-        return view('projects.settings', compact('project'));
+        return view('projects.settings', compact('project', 'setup', 'setupPrompt'));
+    }
+
+    public function issueSetup(Request $request, Project $project): RedirectResponse
+    {
+        $this->assertOwner($request, $project);
+
+        try {
+            $this->connections->issueSetup($project, $request->user());
+        } catch (WorkflowConflict $exception) {
+            return back()->withErrors(['connection' => $exception->getMessage()]);
+        }
+
+        return back()->with('status', 'A new setup prompt was generated. Any previous unused prompt is revoked.');
     }
 
     public function configure(Request $request, Project $project): RedirectResponse

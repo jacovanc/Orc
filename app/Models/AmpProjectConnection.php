@@ -72,6 +72,11 @@ class AmpProjectConnection extends Model
         return $this->hasMany(AmpLaunch::class);
     }
 
+    public function setups(): HasMany
+    {
+        return $this->hasMany(AmpConnectionSetup::class);
+    }
+
     public function isReady(): bool
     {
         return $this->status === 'verified' && $this->verified_at !== null;

@@ -166,4 +166,32 @@ class AmpIntegrationController extends Controller
 
         return response()->json($result, $result['accepted'] ? 200 : 202);
     }
+
+    public function projectSetup(Request $request): JsonResponse
+    {
+        $token = $request->bearerToken();
+        if (! is_string($token) || $token === '') {
+            return response()->json(['message' => 'A project setup capability is required.'], 401);
+        }
+        $payload = $request->validate([
+            'schema_version' => ['required', 'integer', 'in:1'],
+            'action' => ['required', Rule::in(['claim', 'complete'])],
+            'setup_id' => ['required', 'uuid'],
+            'thread_id' => ['required', 'string', 'regex:/^T-[A-Za-z0-9-]+$/'],
+            'amp_project_id' => ['required', 'string', 'max:100'],
+            'launch_webhook_url' => ['nullable', 'required_if:action,complete', 'url:https', 'max:2048'],
+            'controller_source_sha256' => ['nullable', 'required_if:action,complete', 'string', 'size:64'],
+        ]);
+
+        try {
+            $result = $payload['action'] === 'claim'
+                ? $this->connections->claimSetup($token, $payload)
+                : $this->connections->completeSetup($token, $payload);
+        } catch (WorkflowConflict $exception) {
+            return response()->json(['message' => $exception->getMessage()], 409)
+                ->header('Cache-Control', 'no-store');
+        }
+
+        return response()->json($result)->header('Cache-Control', 'no-store');
+    }
 }

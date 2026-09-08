@@ -16,3 +16,6 @@ Route::post('/integrations/amp/stage-capability', [AmpIntegrationController::cla
 
 Route::post('/integrations/amp/connection-verification', [AmpIntegrationController::class, 'connectionVerification'])
     ->middleware('throttle:60,1');
+
+Route::post('/integrations/amp/project-setup', [AmpIntegrationController::class, 'projectSetup'])
+    ->middleware('throttle:30,1');

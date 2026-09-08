@@ -8,6 +8,7 @@ Status: designed before coding and implemented on 2026-09-08. This phase follows
 - `AmpProjectConnection` is an immutable versioned routing configuration for one Project. It stores a public connection ID, expected Amp project ID, controller registration key, encrypted durable webhook URL, encrypted independent launch/callback signing secrets, status, and verification evidence.
 - `WorkflowRun` snapshots both `project_id` and `amp_project_connection_id`. Every later Development retry, QA attempt, reconciliation, and cancellation uses those original identifiers even if Project settings create a newer connection version.
 - `AmpLaunch` also snapshots the connection ID. Queue jobs never select a mutable global endpoint.
+- `AmpConnectionSetup` is a short-lived, revocable pairing capability for one preallocated connection. First claim binds it to the exact expected Amp project and setup thread; completion accepts only the pinned controller digest and SSRF-guarded webhook.
 - `User.can_trigger_amp` is the explicit immutable account permission. Email is profile data, not authority. Existing operators are migrated once; changing an email never grants execution authority and registrations default to false.
 
 Existing runs are grouped into personal Projects by their existing owner and canonical repository. The existing controller configuration becomes connection version 1. Historical run, attempt, event, report, thread, and launch identifiers are preserved. Only accounts on the deployment's legacy operator allowlist receive the one-time permission migration; merely owning historical or synthetic proof runs does not grant launch authority.
@@ -24,7 +25,7 @@ Before a connection becomes ready, Laravel sends a signed, idempotent verificati
 
 - Users may view or mutate only Projects and runs they own. Creating/configuring/verifying a Project or launching/retrying an agent also requires `can_trigger_amp`.
 - Registration remains opt-in and production-disabled. New accounts never receive Amp authority automatically.
-- Controller webhook URLs and both directional secrets are encrypted at rest, accepted only through password-style settings inputs, never redisplayed, and never included in logs or validation messages.
+- Controller webhook URLs and both directional secrets are encrypted at rest and exchanged directly with the setup tool over HTTPS, never copied through settings fields, redisplayed, or included in logs or validation messages.
 - Outbound controller URLs must be HTTPS capability URLs on explicitly allowed Amp webhook hosts, with no credentials, query, fragment, or nonstandard port. Jobs revalidate before each request and store only sanitized failure reasons.
 - Callback routes include the public connection ID and verify with that connection version's callback secret. A callback for one connection cannot mutate a launch bound to another.
 - Broad signing secrets stay in the selected trusted controller and Laravel. Coding/QA Orbs receive only their narrow stage capability; verification Orbs receive a one-time connection-verification capability.
@@ -38,7 +39,7 @@ The previously proposed automated feedback-publication milestone is superseded a
 
 ## UI and non-goals
 
-The application adds an all-project overview and per-project overview, workflow list/detail/start, settings, connection status, safe setup reference, and verification action. It does not add organizations, teams, billing, automatic credential grants, an onboarding wizard, a workflow editor, or automatic merge/approval.
+The application adds an all-project overview and per-project overview, workflow list/detail/start, settings, connection status, a copyable agent-assisted setup prompt, and verification status/action. It does not add organizations, teams, billing, automatic credential grants, broad account discovery, a workflow editor, or automatic merge/approval.
 
 ## Acceptance
 

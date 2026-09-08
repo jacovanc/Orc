@@ -18,6 +18,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/projects', [ProjectController::class, 'store'])->name('projects.store');
     Route::get('/projects/{project}', [ProjectController::class, 'show'])->name('projects.show');
     Route::get('/projects/{project}/settings', [ProjectController::class, 'settings'])->name('projects.settings');
+    Route::post('/projects/{project}/connections/setup', [ProjectController::class, 'issueSetup'])->name('projects.connections.setup');
     Route::post('/projects/{project}/connections', [ProjectController::class, 'configure'])->name('projects.connections.store');
     Route::post('/projects/{project}/connections/verify', [ProjectController::class, 'verify'])->name('projects.connections.verify');
     Route::get('/projects/{project}/workflows/start', [WorkflowController::class, 'create'])->name('projects.workflows.create');

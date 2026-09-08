@@ -35,16 +35,16 @@ Orc does **not** store issue bodies, prompts, generated code, reports, discussio
 
 ## Amp integration setup
 
-The integration is disabled by default. It requires a database queue worker and one trusted controller registered inside every Amp project Orc should route to. Each Project connection uses two independent random HMAC secrets—one for Laravel→controller requests and another for controller→Laravel callbacks.
+The integration is disabled by default. It requires a database queue worker and one trusted controller registered inside every Amp project Orc should route to.
 
-1. Create the Orc Project with its canonical `owner/repository` and the selected Amp project's actual `AMP_PROJECT_ID`.
-2. Install the `orc-worker` User Plugin. It adds stage-bound workflow tools and does not need or read project secrets.
-3. Generate two different secrets and put them with the Project's connection ID and Amp project ID in that Amp project's gitignored, mode-`0600` `.amp/runtime/orc-plugin.json`.
-4. Reload the checked-in `.amp/plugins/orc-integration` controller from that selected Amp project. Copy its durable webhook URL into the matching Orc Project settings with the same two secrets; Orc encrypts all three values and never redisplays them.
-5. Run the Project's **Verify in fresh Orb** action. It checks actual child placement and read-only native `gh` access to the canonical repository. Repeat these steps independently for every Project/Amp project.
-6. Set `QUEUE_CONNECTION=database`, run a worker for `amp-launches`, and enable `AMP_INTEGRATION_ENABLED` only after setup. No global GitHub token, repository allowlist, or mutable-email authority is used.
+1. Create the Orc Project with its canonical `owner/repository` and the selected Amp project's actual `AMP_PROJECT_ID`. Orc immediately preallocates an immutable connection identity.
+2. Open Project Settings and copy its short-lived setup prompt into an already-authenticated agent in that exact Amp project.
+3. The `orc_setup_project` User Plugin tool verifies project identity, installs the SHA-256-pinned project controller, exchanges directional secrets and the webhook over HTTPS, and queues harmless verification. It neither overwrites unrelated plugins nor handles GitHub credentials.
+4. Amp currently requires one manual **plugins: reload** after first installation; tell the same setup agent to continue afterward. No webhook URL or signing secret is copied by hand.
+5. Refresh Orc for the fresh-Orb placement and native `gh` read result. Repeat independently for every Project/Amp project.
+6. Set `QUEUE_CONNECTION=database`, run a worker for `amp-launches`, and enable `AMP_INTEGRATION_ENABLED` only after application setup. No global GitHub token, repository allowlist, or mutable-email authority is used.
 
-Never commit, log, or show the directional secrets, per-launch capabilities, or webhook URL. Orc does not own a GitHub token. Exact configuration, rotation, failure handling, and trust boundaries are in [docs/amp-integration.md](docs/amp-integration.md).
+Never commit or log directional secrets, per-launch capabilities, or webhook URLs. Orc does not own a GitHub token. Exact setup steps are in [Project setup protocol v1](docs/project-setup-v1.md); configuration, rotation, failure handling, and trust boundaries are in [docs/amp-integration.md](docs/amp-integration.md).
 
 ## Local setup
 

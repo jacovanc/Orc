@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Domain\Workflow\Exceptions\WorkflowConflict;
 use App\Jobs\VerifyAmpProjectConnection;
+use App\Models\AmpConnectionSetup;
 use App\Models\AmpProjectConnection;
 use App\Models\Project;
 use App\Models\User;
@@ -12,7 +13,174 @@ use Illuminate\Support\Str;
 
 class AmpProjectConnectionService
 {
+    private const CONTROLLER_KEY = 'orc-stage-launch-v10';
+
+    private const SETUP_TTL_MINUTES = 20;
+
     public function __construct(private readonly AmpConnectionUrlGuard $urlGuard) {}
+
+    /**
+     * Allocate the connection identity before the controller webhook exists.
+     * Existing runs retain their connection snapshot when a newer setup is issued.
+     *
+     * @return array{connection: AmpProjectConnection, setup: AmpConnectionSetup}
+     */
+    public function issueSetup(Project $project, User $actor): array
+    {
+        $this->assertCanManage($project, $actor);
+
+        return DB::transaction(function () use ($project) {
+            $lockedProject = Project::query()->lockForUpdate()->findOrFail($project->id);
+            AmpConnectionSetup::query()
+                ->whereHas('connection', fn ($query) => $query->where('project_id', $lockedProject->id))
+                ->whereIn('status', ['pending', 'claimed'])
+                ->lockForUpdate()
+                ->get()
+                ->each(fn (AmpConnectionSetup $setup) => $setup->forceFill([
+                    'status' => 'revoked',
+                    'token' => null,
+                    'revoked_at' => now(),
+                ])->save());
+
+            $connection = AmpProjectConnection::query()->create([
+                'project_id' => $lockedProject->id,
+                'public_id' => (string) Str::uuid(),
+                'version' => ((int) $lockedProject->connections()->max('version')) + 1,
+                'amp_project_id' => $lockedProject->amp_project_id,
+                'controller_key' => self::CONTROLLER_KEY,
+                'launch_signing_secret' => Str::random(64),
+                'callback_signing_secret' => Str::random(64),
+                'status' => 'setup_pending',
+            ]);
+            $token = Str::random(64);
+            $setup = $connection->setups()->create([
+                'public_id' => (string) Str::uuid(),
+                'token' => $token,
+                'token_hash' => hash('sha256', $token),
+                'status' => 'pending',
+                'expires_at' => now()->addMinutes(self::SETUP_TTL_MINUTES),
+            ]);
+            $lockedProject->forceFill(['current_amp_project_connection_id' => $connection->id])->save();
+
+            return compact('connection', 'setup');
+        }, 3);
+    }
+
+    public function setupPrompt(AmpConnectionSetup $setup): string
+    {
+        return implode("\n", [
+            'Set up this existing Orc Project from this exact Amp project.',
+            '',
+            'Consent and scope: you may install/update only the personal Orc worker integration and this project’s .amp/plugins/orc-integration controller, register its webhook, and run one harmless fresh-Orb placement/native repository-read verification. Do not change code, start a workflow, create a branch or pull request, publish GitHub content, merge anything, or alter unrelated plugins.',
+            '',
+            'Use the already-installed `orc_setup_project` tool with the fields below. Do not print, quote, summarize, or place the capability in shell commands/files. The tool exchanges controller material over HTTPS and writes only owner-readable gitignored runtime configuration.',
+            '',
+            'setup_url: '.url('/api/integrations/amp/project-setup'),
+            'setup_id: '.$setup->public_id,
+            'setup_capability: '.$setup->token,
+            '',
+            'This is Orc setup protocol v1. Authoritative runbook: https://github.com/jacovanc/Orc/blob/main/docs/project-setup-v1.md',
+            'If the tool reports that Amp must reload plugins, ask me to run “plugins: reload” once, then call `orc_setup_project` again with the same fields. Do not claim setup or verification succeeded until the tool confirms it.',
+        ]);
+    }
+
+    public function claimSetup(string $token, array $payload): array
+    {
+        $source = (string) file_get_contents(base_path('.amp/plugins/orc-integration/index.ts'));
+        $sourceHash = hash('sha256', $source);
+
+        return DB::transaction(function () use ($token, $payload, $source, $sourceHash) {
+            $setup = $this->lockedSetup($token, $payload['setup_id']);
+            $connection = $setup->connection()->with('project')->firstOrFail();
+            $this->assertSetupIdentity($setup, $connection, $payload);
+
+            if ($setup->status === 'completed') {
+                return ['accepted' => true, 'disposition' => 'already_completed', 'verification_status' => $connection->status];
+            }
+            if ($setup->status === 'revoked') {
+                throw new WorkflowConflict('This project setup capability was revoked.');
+            }
+            if ($setup->isExpired()) {
+                $setup->forceFill(['status' => 'expired', 'token' => null])->save();
+                throw new WorkflowConflict('This project setup capability expired. Generate a new prompt in Orc.');
+            }
+            if ($setup->claimed_thread_id && $setup->claimed_thread_id !== $payload['thread_id']) {
+                throw new WorkflowConflict('This project setup capability is already bound to another Amp thread.');
+            }
+
+            $setup->forceFill([
+                'status' => 'claimed',
+                'claimed_at' => $setup->claimed_at ?: now(),
+                'claimed_thread_id' => $payload['thread_id'],
+                'claimed_amp_project_id' => $payload['amp_project_id'],
+                'controller_source_sha256' => $sourceHash,
+            ])->save();
+
+            return [
+                'accepted' => true,
+                'disposition' => 'claimed',
+                'protocol_version' => 1,
+                'connection_id' => $connection->public_id,
+                'amp_project_id' => $connection->amp_project_id,
+                'github_repository' => $connection->project->github_repository,
+                'controller_key' => $connection->controller_key,
+                'controller_source' => $source,
+                'controller_source_sha256' => $sourceHash,
+                'runtime_config' => [
+                    'connectionId' => $connection->public_id,
+                    'ampProjectId' => $connection->amp_project_id,
+                    'launchSigningSecret' => $connection->launch_signing_secret,
+                    'callbackSigningSecret' => $connection->callback_signing_secret,
+                ],
+            ];
+        }, 3);
+    }
+
+    public function completeSetup(string $token, array $payload): array
+    {
+        $shouldVerify = false;
+        $connection = DB::transaction(function () use ($token, $payload, &$shouldVerify) {
+            $setup = $this->lockedSetup($token, $payload['setup_id']);
+            $connection = $setup->connection()->with('project.user')->firstOrFail();
+            $this->assertCanManage($connection->project, $connection->project->user);
+            $this->assertSetupIdentity($setup, $connection, $payload);
+
+            if ($setup->status === 'completed') {
+                return $connection;
+            }
+            if ($setup->status !== 'claimed' || $setup->isExpired()) {
+                throw new WorkflowConflict('This project setup capability is not active. Generate a new prompt in Orc.');
+            }
+            if (! hash_equals((string) $setup->controller_source_sha256, $payload['controller_source_sha256'])) {
+                throw new WorkflowConflict('The installed controller does not match the setup artifact issued by Orc.');
+            }
+            $this->urlGuard->assertAllowed($payload['launch_webhook_url']);
+            $connection->forceFill([
+                'launch_webhook_url' => trim($payload['launch_webhook_url']),
+                'status' => 'pending',
+                'last_error_code' => null,
+                'last_error_message' => null,
+            ])->save();
+            $setup->forceFill([
+                'status' => 'completed',
+                'webhook_url_hash' => hash('sha256', trim($payload['launch_webhook_url'])),
+                'completed_at' => now(),
+            ])->save();
+            $shouldVerify = true;
+
+            return $connection;
+        }, 3);
+
+        if ($shouldVerify) {
+            $connection = $this->beginVerification($connection->project, $connection, $connection->project->user);
+        }
+
+        return [
+            'accepted' => true,
+            'disposition' => $shouldVerify ? 'completed' : 'already_completed',
+            'verification_status' => $connection->fresh()->status,
+        ];
+    }
 
     public function configure(Project $project, User $actor, array $attributes): AmpProjectConnection
     {
@@ -32,7 +200,7 @@ class AmpProjectConnectionService
                 'public_id' => (string) Str::uuid(),
                 'version' => $version,
                 'amp_project_id' => $attributes['amp_project_id'],
-                'controller_key' => 'orc-stage-launch-v9',
+                'controller_key' => self::CONTROLLER_KEY,
                 'launch_webhook_url' => trim($attributes['launch_webhook_url']),
                 'launch_signing_secret' => $attributes['launch_signing_secret'],
                 'callback_signing_secret' => $attributes['callback_signing_secret'],
@@ -236,6 +404,31 @@ class AmpProjectConnectionService
     {
         if ($project->user_id !== $actor->id || ! $actor->can_trigger_amp) {
             throw new WorkflowConflict('Your account is not permitted to manage this Amp project connection.');
+        }
+    }
+
+    private function lockedSetup(string $token, string $publicId): AmpConnectionSetup
+    {
+        $setup = AmpConnectionSetup::query()
+            ->where('public_id', $publicId)
+            ->where('token_hash', hash('sha256', $token))
+            ->lockForUpdate()
+            ->first();
+        if (! $setup || ! $setup->token || ! hash_equals((string) $setup->token, $token)) {
+            throw new WorkflowConflict('This project setup capability is invalid.');
+        }
+
+        return $setup;
+    }
+
+    private function assertSetupIdentity(AmpConnectionSetup $setup, AmpProjectConnection $connection, array $payload): void
+    {
+        if (
+            $payload['amp_project_id'] !== $connection->amp_project_id
+            || ($setup->claimed_amp_project_id && $setup->claimed_amp_project_id !== $payload['amp_project_id'])
+            || ($setup->claimed_thread_id && $setup->claimed_thread_id !== $payload['thread_id'])
+        ) {
+            throw new WorkflowConflict('This setup prompt belongs to a different Amp project or thread.');
         }
     }
 }
