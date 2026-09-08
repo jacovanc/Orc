@@ -156,9 +156,9 @@ export default function (amp: PluginAPI) {
 	amp.on('agent.end', async (event) => agentEndSafetyNet(event, config))
 
 	void amp.createWebhook({
-		// Version the durable registration whenever launch behavior changes because
-		// an existing capability can retain its previously loaded handler.
-		key: 'orc-stage-launch-v10',
+		// Amp shares registrations by key across project threads. Bind the key to
+		// this immutable connection so re-pairing cannot retain a stale handler.
+		key: `orc-stage-launch-v11-${config.connectionId}`,
 		headers: ['idempotency-key', 'x-orc-event-id', 'x-orc-timestamp', 'x-orc-signature'],
 		handler: async (event, ctx) => handleLaunch(event, ctx, config, proofAgent, developmentAgent, qaAgent, verificationAgent, amp),
 	}).then((registration) => {

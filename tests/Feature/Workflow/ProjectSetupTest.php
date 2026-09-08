@@ -41,7 +41,10 @@ class ProjectSetupTest extends TestCase
         $response->assertRedirect(route('projects.settings', $project));
         $this->assertSame('acme/widgets', $project->github_repository);
         $this->assertSame('setup_pending', $project->currentConnection->status);
-        $this->assertSame('orc-stage-launch-v10', $project->currentConnection->controller_key);
+        $this->assertSame(
+            'orc-stage-launch-v11-'.$project->currentConnection->public_id,
+            $project->currentConnection->controller_key,
+        );
         $this->assertNotNull($project->current_amp_project_connection_id);
         $raw = DB::table('amp_connection_setups')->where('id', $setup->id)->first();
         $this->assertNotSame($setup->token, $raw->token);
@@ -135,6 +138,11 @@ class ProjectSetupTest extends TestCase
         $new = $service->issueSetup($project->fresh(), $this->owner);
         $this->assertNotSame($project->current_amp_project_connection_id, $new['connection']->id);
         $this->assertSame(2, $new['connection']->version);
+        $this->assertNotSame($project->currentConnection->controller_key, $new['connection']->controller_key);
+        $this->assertSame(
+            'orc-stage-launch-v11-'.$new['connection']->public_id,
+            $new['connection']->controller_key,
+        );
         $this->assertSame('pending', $new['setup']->status);
         $this->assertSame('revoked', $setup->fresh()->status);
         $this->assertNull($setup->fresh()->token);

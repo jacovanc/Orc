@@ -13,7 +13,7 @@ use Illuminate\Support\Str;
 
 class AmpProjectConnectionService
 {
-    private const CONTROLLER_KEY = 'orc-stage-launch-v10';
+    private const CONTROLLER_KEY_PREFIX = 'orc-stage-launch-v11';
 
     private const SETUP_TTL_MINUTES = 20;
 
@@ -42,12 +42,13 @@ class AmpProjectConnectionService
                     'revoked_at' => now(),
                 ])->save());
 
+            $publicId = (string) Str::uuid();
             $connection = AmpProjectConnection::query()->create([
                 'project_id' => $lockedProject->id,
-                'public_id' => (string) Str::uuid(),
+                'public_id' => $publicId,
                 'version' => ((int) $lockedProject->connections()->max('version')) + 1,
                 'amp_project_id' => $lockedProject->amp_project_id,
-                'controller_key' => self::CONTROLLER_KEY,
+                'controller_key' => $this->controllerKey($publicId),
                 'launch_signing_secret' => Str::random(64),
                 'callback_signing_secret' => Str::random(64),
                 'status' => 'setup_pending',
@@ -195,12 +196,13 @@ class AmpProjectConnectionService
         return DB::transaction(function () use ($project, $attributes) {
             $lockedProject = Project::query()->lockForUpdate()->findOrFail($project->id);
             $version = ((int) $lockedProject->connections()->max('version')) + 1;
+            $publicId = (string) Str::uuid();
             $connection = AmpProjectConnection::query()->create([
                 'project_id' => $lockedProject->id,
-                'public_id' => (string) Str::uuid(),
+                'public_id' => $publicId,
                 'version' => $version,
                 'amp_project_id' => $attributes['amp_project_id'],
-                'controller_key' => self::CONTROLLER_KEY,
+                'controller_key' => $this->controllerKey($publicId),
                 'launch_webhook_url' => trim($attributes['launch_webhook_url']),
                 'launch_signing_secret' => $attributes['launch_signing_secret'],
                 'callback_signing_secret' => $attributes['callback_signing_secret'],
@@ -405,6 +407,14 @@ class AmpProjectConnectionService
         if ($project->user_id !== $actor->id || ! $actor->can_trigger_amp) {
             throw new WorkflowConflict('Your account is not permitted to manage this Amp project connection.');
         }
+    }
+
+    private function controllerKey(string $connectionPublicId): string
+    {
+        // Amp shares a durable webhook registration by plugin key across project
+        // threads. A connection-scoped key prevents a replacement connection
+        // from inheriting a handler owned by an older or disconnected thread.
+        return self::CONTROLLER_KEY_PREFIX.'-'.$connectionPublicId;
     }
 
     private function lockedSetup(string $token, string $publicId): AmpConnectionSetup

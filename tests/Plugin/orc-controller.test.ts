@@ -17,7 +17,7 @@ function launch(overrides: Record<string, unknown> = {}) {
 		project_id: 1,
 		connection_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		amp_project_id: 'amp-project-test',
-		controller_key: 'orc-stage-launch-v10',
+		controller_key: 'orc-stage-launch-v11-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		callback_url: 'https://orc.test/api/integrations/amp/connections/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		event_id: '11111111-1111-4111-8111-111111111111',
 		idempotency_key: '22222222-2222-4222-8222-222222222222',
@@ -205,7 +205,7 @@ describe('Orc controller agent configuration', () => {
 
 	test('marks a claimed launch without a durable thread ambiguous instead of creating a duplicate Orb', async () => {
 		const harness = await controllerHarness('claimed-without-thread')
-		expect(harness.webhookKey()).toBe('orc-stage-launch-v10')
+		expect(harness.webhookKey()).toBe('orc-stage-launch-v11-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
 		const callbackTypes: string[] = []
 		globalThis.fetch = (async (_input, init) => {
 			const payload = JSON.parse(String(init?.body))
