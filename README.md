@@ -4,6 +4,9 @@ Orc is a Laravel-native workflow orchestrator for software delivery. It coordina
 
 Milestones 1–6 are implemented as an authenticated, server-rendered application with durable Laravel↔Amp orchestration and real Development mode. Read the [domain and architecture](docs/architecture.md), [Amp integration runbook](docs/amp-integration.md), and [Milestone 6 design](docs/milestone-6-design.md) before extending the workflow engine.
 
+Before allowing an administrator to start Amp-backed workflows, complete the
+[operator access onboarding checklist](docs/operator-access-checklist.md).
+
 ## What is included
 
 - Versioned, immutable workflow definitions with agent, human, and terminal stages.
