@@ -146,7 +146,7 @@ export default function (amp: PluginAPI) {
 	void amp.createWebhook({
 		// Version the durable registration whenever launch behavior changes because
 		// an existing capability can retain its previously loaded handler.
-		key: 'orc-stage-launch-v4',
+		key: 'orc-stage-launch-v5',
 		headers: ['idempotency-key', 'x-orc-event-id', 'x-orc-timestamp', 'x-orc-signature'],
 		handler: async (event, ctx) => handleLaunch(event, ctx, config, proofAgent, developmentAgent, qaAgent, amp),
 	}).then((registration) => {
@@ -378,7 +378,6 @@ async function stillActive(threadId: string, config: RuntimeConfig) {
 
 async function agentEndSafetyNet(event: AgentEndEvent, config: RuntimeConfig | null) {
 	if (!config) return
-	if (monitoredThreads.has(event.thread.id)) return
 
 	let context: LaunchPayload
 	try {

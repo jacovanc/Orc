@@ -32,7 +32,7 @@ function launch(overrides: Record<string, unknown> = {}) {
 	}
 }
 
-async function controllerHarness(testName: string) {
+async function controllerHarness(testName: string, holdResponses = false) {
 	const root = `/tmp/orc-controller-${testName}`
 	rmSync(root, { recursive: true, force: true })
 	mkdirSync(`${root}/.amp/runtime`, { recursive: true })
@@ -47,12 +47,15 @@ async function controllerHarness(testName: string) {
 	let createThreadCalls = 0
 	let cancelled = 0
 	let prompted = 0
+	let agentEndHandler: ((event: Record<string, any>) => Promise<unknown>) | undefined
 	const thread = {
 		id: 'T-00000000-0000-0000-0000-000000000041',
 		cancel: async () => { cancelled++ },
 		appendUserMessage: async () => { prompted++ },
 		messages: async () => [],
-		waitForResponse: async () => undefined,
+		waitForResponse: async () => holdResponses
+			? await new Promise<never>(() => undefined)
+			: undefined,
 	}
 	controller({
 		system: { workspaceRoot: `file://${root}` },
@@ -62,7 +65,9 @@ async function controllerHarness(testName: string) {
 			createThread: async () => { createThreadCalls++; return thread },
 		}),
 		registerAgentMode: () => undefined,
-		on: () => undefined,
+		on: (event: string, callback: typeof agentEndHandler) => {
+			if (event === 'agent.end') agentEndHandler = callback
+		},
 		createWebhook: async (config: { key: string; handler: typeof handler }) => {
 			webhookKey = config.key
 			handler = config.handler
@@ -97,6 +102,10 @@ async function controllerHarness(testName: string) {
 			})
 		},
 		counts: () => ({ createThreadCalls, cancelled, prompted }),
+		invokeAgentEnd: async (status: string) => {
+			if (!agentEndHandler) throw new Error('Controller did not register agent.end.')
+			return agentEndHandler({ thread: { id: thread.id }, status })
+		},
 	}
 }
 
@@ -168,7 +177,7 @@ describe('Orc controller agent configuration', () => {
 
 	test('marks a claimed launch without a durable thread ambiguous instead of creating a duplicate Orb', async () => {
 		const harness = await controllerHarness('claimed-without-thread')
-		expect(harness.webhookKey()).toBe('orc-stage-launch-v4')
+		expect(harness.webhookKey()).toBe('orc-stage-launch-v5')
 		const callbackTypes: string[] = []
 		globalThis.fetch = (async (_input, init) => {
 			const payload = JSON.parse(String(init?.body))
@@ -183,6 +192,39 @@ describe('Orc controller agent configuration', () => {
 
 		expect(callbackTypes).toEqual(['launch.claim', 'launch.ambiguous'])
 		expect(harness.counts()).toEqual({ createThreadCalls: 0, cancelled: 0, prompted: 0 })
+		rmSync(harness.root, { recursive: true, force: true })
+	})
+
+	test('agent end gives one corrective turn even while the transcript monitor is waiting', async () => {
+		const harness = await controllerHarness('agent-end-monitor-race', true)
+		globalThis.fetch = (async (_input, init) => {
+			const payload = JSON.parse(String(init?.body))
+			if (payload.type === 'launch.claim') {
+				return Response.json({
+					accepted: true,
+					launch: false,
+					is_active: true,
+					thread_id: 'T-00000000-0000-0000-0000-000000000041',
+				})
+			}
+			if (payload.type === 'launch.acknowledged') return Response.json({ accepted: true })
+			if (payload.action === 'context') {
+				return Response.json({
+					...launch(),
+					thread_id: 'T-00000000-0000-0000-0000-000000000041',
+					completed: false,
+					is_active: true,
+				})
+			}
+			throw new Error(`Unexpected callback: ${JSON.stringify(payload)}`)
+		}) as typeof fetch
+
+		await harness.invoke(launch())
+		const result = await harness.invokeAgentEnd('done') as Record<string, unknown>
+
+		expect(result.action).toBe('continue')
+		expect(result.userMessage).toContain('Safety check')
+		expect(harness.counts()).toEqual({ createThreadCalls: 0, cancelled: 0, prompted: 1 })
 		rmSync(harness.root, { recursive: true, force: true })
 	})
 
