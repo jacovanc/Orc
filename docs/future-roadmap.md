@@ -8,6 +8,6 @@
 4. **Configurable workflow editor:** new immutable definition versions with validation and preview.
 5. **Deferred onboarding:** versioned setup documentation first, then a separately reviewed Connect Amp experience if supported APIs and threat modeling justify it.
 
-The earlier proposed Milestone 8 feature that would publish human feedback from Orc is **superseded**. Humans comment or review directly on GitHub and provide Orc only the feedback URL when manually requesting changes. GitHub remains the sole home of feedback text.
+The earlier proposed Milestone 8 feature that would publish human feedback from Orc is **superseded**. Humans comment or review directly on GitHub, then manually choose an outcome in Orc without supplying a feedback URL. GitHub remains the sole home of feedback text.
 
 Projects/routing does not include organizations, team permissions, billing, automatic GitHub credential grants, automatic Amp project creation, or an onboarding wizard. Agent-assisted onboarding remains deferred until routing, hardening, and workflow configuration are stable.

@@ -181,9 +181,8 @@
                                 <form method="POST" action="{{ route('workflows.attempts.human-action', [$run, $active]) }}" class="rounded-2xl border border-white/[0.08] bg-black/10 p-5">
                                     @csrf
                                     <input type="hidden" name="outcome" value="request_changes">
-                                    <label class="field-label" for="github_feedback_url">GitHub feedback URL</label>
-                                    <input class="field-input" type="url" name="github_feedback_url" id="github_feedback_url" placeholder="https://github.com/owner/repo/pull/…#discussion_r…" required>
-                                    <label class="mt-4 flex items-start gap-3 text-xs leading-5 text-zinc-400"><input class="mt-1" type="checkbox" name="github_feedback_confirmed" value="1" required><span>I confirm that I published the requested changes on the bound GitHub pull request. Orc stores only the URL, never the feedback text.</span></label>
+                                    <p class="text-sm font-medium text-orange-100">Send back to Development</p>
+                                    <p class="mt-1 text-xs leading-5 text-zinc-400">Leave any feedback directly on GitHub. The fresh Development agent will reread the bound pull request, reviews, inline comments, and discussion before editing.</p>
                                     <button class="button-quiet mt-4 border border-white/10" type="submit">Request changes <span class="text-zinc-600">→ Development</span></button>
                                 </form>
                             @elseif ($transition->outcome === 'approve')

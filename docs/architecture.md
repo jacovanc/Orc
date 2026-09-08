@@ -24,7 +24,7 @@ A node in a definition with a stable `key`, display `name`, `type`, configuratio
 Stage types:
 
 - `agent`: future Amp-driven work. Configuration may name an agent role, but not contain task requirements.
-- `human`: waits for an authorized user to choose a permitted outcome. Outcomes that request changes require feedback, but the feedback must be published to GitHub rather than stored in Orc. Until GitHub publication exists, the MVP accepts a GitHub discussion/comment URL as proof of publication.
+- `human`: waits for an authorized user to choose a permitted outcome. Reviewers may publish feedback directly on GitHub, but Orc neither stores that text nor requires a link or confirmation before accepting the decision.
 - `terminal`: an end state such as Done.
 
 ### WorkflowTransition
@@ -69,7 +69,7 @@ Workflow v2 and v3 are separately frozen definitions documented in [Milestone 6]
 6. Outcomes must exist as transitions on the attempt's stage. Entering a terminal stage creates an immediately closed attempt, then completes the workflow.
 7. Attempt numbers are allocated under the run lock from the current (and therefore highest) attempt, so loops retain a monotonically ordered history.
 8. Cancelled, completed, and failed workflows cannot transition. Cancellation is idempotent and closes the current active attempt.
-9. Human actions are accepted only for the current active human attempt and only when permitted by the definition. `request_changes` requires a valid GitHub URL proving feedback was published; Orc records only that URL in the event metadata.
+9. Human actions are accepted only for the current active human attempt and only when permitted by the definition. Approval completes directly; `request_changes` starts one fresh Development attempt whose agent rereads the bound pull request, reviews, inline comments, and discussion from GitHub.
 10. Agent simulation is available only when Amp integration is disabled and is visibly marked as simulation in both the UI and event stream.
 
 ## Service and HTTP shape
@@ -114,7 +114,7 @@ Self-registration is opt-in and source-default-disabled. Independently, workflow
 ## Current limitations
 
 - No workflow editor; definitions are seeded in code and the database.
-- No stored review-feedback text. Reviewers publish feedback on GitHub and submit its URL.
+- No stored review-feedback text. Reviewers publish any feedback directly on GitHub, then choose Approve or Request Changes in Orc without a separate URL or confirmation field.
 - Real Development was live-proven on user-authorized `jacovanc/Orc#2`; public-repository operation is proven, private-repository operation is not claimed.
 - QA in workflow v2 remains orchestration proof only, named `proof_complete`, and is never code validation or approval. New runs may select workflow v3 for independent substantive QA.
 - Ambiguous launches are surfaced for operator action rather than automatically retried into a possible duplicate.

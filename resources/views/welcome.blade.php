@@ -32,7 +32,7 @@
             </div>
         </div>
         <div class="mt-20 grid gap-px overflow-hidden rounded-3xl border border-white/[0.08] bg-white/[0.08] lg:grid-cols-3">
-            @foreach ([['01', 'Agent execution', 'A focused development stage advances only on an explicit outcome.'], ['02', 'Quality loops', 'Failed QA returns to development as a new, numbered attempt.'], ['03', 'Human control', 'Reviewers approve or link feedback already published on GitHub.']] as [$number, $heading, $copy])
+            @foreach ([['01', 'Agent execution', 'A focused development stage advances only on an explicit outcome.'], ['02', 'Quality loops', 'Failed QA returns to development as a new, numbered attempt.'], ['03', 'Human control', 'Reviewers approve or request changes after reviewing the pull request on GitHub.']] as [$number, $heading, $copy])
                 <article class="bg-ink-900/90 p-7 backdrop-blur-sm sm:p-9">
                     <p class="font-mono text-xs text-orange-400">{{ $number }}</p>
                     <h2 class="mt-8 text-xl font-semibold tracking-tight text-white">{{ $heading }}</h2>

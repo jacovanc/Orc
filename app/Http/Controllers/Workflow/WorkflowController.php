@@ -138,7 +138,6 @@ class WorkflowController extends Controller
                 $stageRun,
                 $request->string('outcome')->toString(),
                 $request->user(),
-                $request->input('github_feedback_url'),
             );
         } catch (WorkflowConflict $exception) {
             return back()->withInput()->withErrors(['workflow' => $exception->getMessage()]);

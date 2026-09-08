@@ -100,7 +100,6 @@ class WorkflowEngineTest extends TestCase
             $run->activeStageRun,
             'request_changes',
             $this->user,
-            'https://github.com/acme/widgets/pull/8#discussion_r123',
         );
 
         $attempts = $run->stageRuns()->with('stage')->get();
@@ -114,10 +113,7 @@ class WorkflowEngineTest extends TestCase
         $this->assertSame(1, $attempts->whereNotNull('active_slot')->count());
 
         $event = $run->events()->where('type', 'stage.completed')->reorder()->latest('id')->firstOrFail();
-        $this->assertSame(
-            'https://github.com/acme/widgets/pull/8#discussion_r123',
-            $event->metadata['github_feedback_url'],
-        );
+        $this->assertArrayNotHasKey('github_feedback_url', $event->metadata);
         $this->assertArrayNotHasKey('feedback', $event->metadata);
     }
 
@@ -219,7 +215,7 @@ class WorkflowEngineTest extends TestCase
         $this->engine->simulateAgentCompletion($run, $attempt, 'success', $this->user);
     }
 
-    public function test_human_action_requires_human_stage_and_github_feedback_for_changes(): void
+    public function test_human_action_requires_a_human_stage_but_not_feedback_for_changes(): void
     {
         $run = $this->startRun();
 
@@ -232,24 +228,15 @@ class WorkflowEngineTest extends TestCase
 
         $run = $this->simulate($run, 'success');
         $run = $this->simulate($run, 'pass');
+        $review = $run->activeStageRun;
+        $run = $this->engine->completeHumanAction($run, $review, 'request_changes', $this->user);
 
-        foreach ([null, 'https://example.com/review/1'] as $invalidUrl) {
-            try {
-                $this->engine->completeHumanAction(
-                    $run,
-                    $run->activeStageRun,
-                    'request_changes',
-                    $this->user,
-                    $invalidUrl,
-                );
-                $this->fail('Request changes should require GitHub-published feedback.');
-            } catch (WorkflowConflict $exception) {
-                $this->assertStringContainsString('published on GitHub', $exception->getMessage());
-            }
-        }
+        $this->assertSame('development', $run->currentStage->key);
+        $this->assertSame(StageRunStatus::Running, $run->activeStageRun->status);
+        $this->assertSame(4, $run->activeStageRun->attempt_number);
 
-        $this->assertSame('human_review', $run->fresh('currentStage')->currentStage->key);
-        $this->assertSame(StageRunStatus::Waiting, $run->activeStageRun->fresh()->status);
+        $duplicate = $this->engine->completeHumanAction($run, $review, 'request_changes', $this->user);
+        $this->assertSame(4, $duplicate->stageRuns()->count());
     }
 
     public function test_database_constraint_prevents_two_active_attempts(): void

@@ -74,7 +74,7 @@ On QA `fail`, the central engine transactionally closes the QA attempt and start
 
 For workflow v3 remediation, Development reuses the verified existing PR head branch rather than opening parallel remediation PRs. The new attempt marker is added to that PR before publication is attested. This keeps one review surface while immutable StageRuns, report markers, Amp thread IDs, and append-only events preserve attempt history. Initial Development still uses `orc/stage-<stage-run-id>-attempt-<attempt>`.
 
-Human `request_changes` follows the same remediation path after the user first publishes feedback on GitHub and supplies its URL to Orc.
+Human `request_changes` follows the same remediation path without requiring a feedback URL or confirmation in Orc. The fresh Development agent rereads the bound pull request, reviews, inline comments, and discussion directly from GitHub.
 
 ## Capability and concurrency invariants
 

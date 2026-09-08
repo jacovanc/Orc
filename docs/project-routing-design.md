@@ -32,7 +32,7 @@ Before a connection becomes ready, Laravel sends a signed, idempotent verificati
 
 ## Manual feedback
 
-Humans publish review comments directly on the GitHub pull request, then choose Request Changes or Approve in Orc. Request Changes requires the matching GitHub PR/review/discussion URL and a confirmation that feedback is already published. Orc stores only that URL. The fresh Development attempt rereads the issue, exact PR discussion, reviews, inline comments, QA reports, and CI from GitHub before editing.
+Humans publish any review comments directly on the GitHub pull request, then choose Request Changes or Approve in Orc. Orc requires neither a feedback URL nor a confirmation checkbox. The fresh Development attempt rereads the issue, exact PR discussion, reviews, inline comments, QA reports, and CI from GitHub before editing.
 
 The previously proposed automated feedback-publication milestone is superseded and will not be built.
 

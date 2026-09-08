@@ -29,7 +29,7 @@ GitHub owns all substantive work context. Orc persists only:
 - workflow definition/stage/transition identifiers;
 - run and attempt status, outcomes, and timestamps;
 - Amp thread/event identifiers, launch delivery state, callback idempotency facts, and lifecycle timestamps;
-- event metadata containing orchestration identifiers and URLs of reports or feedback already published on GitHub.
+- event metadata containing orchestration identifiers and URLs of agent reports published on GitHub.
 
 Orc does **not** store issue bodies, prompts, generated code, reports, discussion, or review-feedback text.
 
@@ -73,7 +73,7 @@ vendor/bin/pint --test
 npm run build
 ```
 
-Workflow coverage includes the seeded graph, forward transitions, QA and review loops, attempt numbering, idempotent and competing completions, stale attempts, invalid outcomes, cancellation, human-action restrictions, required GitHub feedback links, event immutability, ownership, request validation, and the database active-attempt constraint. Integration coverage additionally exercises signed callbacks, stable launch retries, persistent claims and callback deduplication, callback-before-response ordering, foreign threads, cancelled/stale attempts, agent failures, and permanent versus ambiguous delivery outcomes.
+Workflow coverage includes the seeded graph, forward transitions, QA and review loops, attempt numbering, idempotent and competing completions, stale attempts, invalid outcomes, cancellation, human-action restrictions, link-free human approval/change requests, event immutability, ownership, request validation, and the database active-attempt constraint. Integration coverage additionally exercises signed callbacks, stable launch retries, persistent claims and callback deduplication, callback-before-response ordering, foreign threads, cancelled/stale attempts, agent failures, and permanent versus ambiguous delivery outcomes.
 
 ## Deployment
 
@@ -100,7 +100,7 @@ Deployment status and exact verification evidence are recorded in [IMPLEMENTATIO
 - A per-launch capability replaces broad callback credentials in fresh coding Orbs. It is bound to one attempt/thread and cannot grant repository access.
 - Reports use an unguessable per-launch nonce, native GitHub author checks, paginated reconciliation, and durable Laravel attestation before completion.
 - A crash in the narrow interval after Amp creates a thread but before Laravel receives its thread ID leaves the launch claimed for manual reconciliation. Orc deliberately does not risk a duplicate Orb.
-- Change feedback must be published manually on GitHub; Orc stores its URL only.
+- Any change feedback is published manually on GitHub. Orc requires no feedback URL or confirmation before a human chooses Request Changes or Approve.
 - Project connection changes create new versions. Existing runs, retries, QA, reconciliation, and cancellation stay bound to their original connection. A real second-project placement proof still requires a second user-configured Amp project.
 - There is no workflow editor. Definitions are seeded and versioned in code/database.
 - Real Development has a completed controlled public-repository acceptance on documentation issue `jacovanc/Orc#2`; Orc left its pull request open, the user merged it directly on GitHub, then separately approved the Orc Human Review. This does not prove private-repository operation.
@@ -110,6 +110,6 @@ Deployment status and exact verification evidence are recorded in [IMPLEMENTATIO
 
 1. Keep `WorkflowEngine` as the only mutation boundary.
 2. Treat completion as an idempotent command addressed to an expected attempt ID.
-3. Publish substantive agent output and human feedback to GitHub; store only external identifiers in Orc.
+3. Publish substantive agent output and human feedback to GitHub; Orc stores only the external identifiers required for orchestration.
 4. Add a new definition version instead of editing a definition already referenced by a run.
 5. Preserve append-only event history and never repurpose an existing attempt number.

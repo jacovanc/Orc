@@ -98,11 +98,12 @@ class WorkflowPagesTest extends TestCase
         $this->assertSame('cancelled', $run->fresh()->status->value);
     }
 
-    public function test_human_review_page_only_exposes_permitted_actions_and_requires_feedback_link(): void
+    public function test_human_review_actions_need_no_feedback_field_and_request_changes_routes_once(): void
     {
         $run = $this->startRun();
         $run = $this->engine->simulateAgentCompletion($run, $run->activeStageRun, 'success', $this->user);
         $run = $this->engine->simulateAgentCompletion($run, $run->activeStageRun, 'pass', $this->user);
+        $reviewAttempt = $run->activeStageRun;
 
         $this->actingAs($this->user)
             ->get(route('workflows.show', $run))
@@ -110,13 +111,54 @@ class WorkflowPagesTest extends TestCase
             ->assertSee('Human Review')
             ->assertSee('Request changes')
             ->assertSee('Approve')
-            ->assertSee('GitHub feedback URL');
+            ->assertSee('The fresh Development agent will reread the bound pull request')
+            ->assertDontSee('GitHub feedback URL')
+            ->assertDontSee('github_feedback_confirmed', false);
+
+        $this->actingAs($this->user)
+            ->post(route('workflows.attempts.human-action', [$run, $reviewAttempt]), [
+                'outcome' => 'request_changes',
+            ])
+            ->assertSessionHas('status', 'Review decision recorded.');
+
+        $this->assertSame('development', $run->fresh('currentStage')->currentStage->key);
+        $this->assertSame(4, $run->stageRuns()->count());
+
+        $this->actingAs($this->user)
+            ->post(route('workflows.attempts.human-action', [$run, $reviewAttempt]), [
+                'outcome' => 'request_changes',
+            ])
+            ->assertSessionHas('status', 'Review decision recorded.');
+
+        $this->assertSame(4, $run->stageRuns()->count());
+        $this->assertSame(1, $run->stageRuns()->where('active_slot', 1)->count());
+    }
+
+    public function test_human_review_can_be_approved_without_feedback_fields(): void
+    {
+        $run = $this->startRun();
+        $run = $this->engine->simulateAgentCompletion($run, $run->activeStageRun, 'success', $this->user);
+        $run = $this->engine->simulateAgentCompletion($run, $run->activeStageRun, 'pass', $this->user);
 
         $this->actingAs($this->user)
             ->post(route('workflows.attempts.human-action', [$run, $run->activeStageRun]), [
-                'outcome' => 'request_changes',
+                'outcome' => 'approve',
             ])
-            ->assertSessionHasErrors('github_feedback_url');
+            ->assertSessionHas('status', 'Review decision recorded.');
+
+        $this->assertSame('completed', $run->fresh()->status->value);
+        $this->assertSame('done', $run->fresh('currentStage')->currentStage->key);
+    }
+
+    public function test_human_action_still_requires_an_outcome(): void
+    {
+        $run = $this->startRun();
+        $run = $this->engine->simulateAgentCompletion($run, $run->activeStageRun, 'success', $this->user);
+        $run = $this->engine->simulateAgentCompletion($run, $run->activeStageRun, 'pass', $this->user);
+
+        $this->actingAs($this->user)
+            ->post(route('workflows.attempts.human-action', [$run, $run->activeStageRun]))
+            ->assertSessionHasErrors('outcome');
 
         $this->assertSame('human_review', $run->fresh('currentStage')->currentStage->key);
     }

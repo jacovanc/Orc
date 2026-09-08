@@ -127,7 +127,6 @@ class WorkflowEngine
         StageRun $attempt,
         string $outcome,
         User $actor,
-        ?string $githubFeedbackUrl = null,
     ): WorkflowRun {
         return $this->completeAttempt(
             $run,
@@ -135,7 +134,6 @@ class WorkflowEngine
             $outcome,
             CompletionSource::HumanAction,
             $actor,
-            $githubFeedbackUrl,
         );
     }
 
@@ -188,9 +186,6 @@ class WorkflowEngine
             }
 
             $this->assertSourceMatchesStage($source, $attempt->stage);
-            $feedbackUrl = $source === CompletionSource::HumanAction
-                ? $this->validateFeedback($lockedRun, $outcome, $githubReferenceUrl)
-                : null;
 
             if ($attempt->status === StageRunStatus::Completed) {
                 if ($attempt->outcome === $outcome) {
@@ -245,9 +240,6 @@ class WorkflowEngine
                 'outcome' => $outcome,
                 'source' => $source->value,
             ];
-            if ($feedbackUrl) {
-                $eventMetadata['github_feedback_url'] = $feedbackUrl;
-            }
             if ($source === CompletionSource::AmpAgent && $githubReferenceUrl) {
                 $eventMetadata['github_report_url'] = $githubReferenceUrl;
                 $eventMetadata['amp_thread_id'] = $ampThreadId;
@@ -1185,31 +1177,6 @@ class WorkflowEngine
         if (! $matches) {
             throw new WorkflowConflict('That completion action is not permitted for this stage type.');
         }
-    }
-
-    private function validateFeedback(WorkflowRun $run, string $outcome, ?string $githubFeedbackUrl): ?string
-    {
-        if ($outcome !== 'request_changes') {
-            return null;
-        }
-
-        if (! $githubFeedbackUrl || ! $this->isGitHubUrl($githubFeedbackUrl)) {
-            throw new WorkflowConflict(
-                'Requesting changes requires the URL of feedback already published on GitHub.'
-            );
-        }
-
-        $pullRequestNumber = $run->stageRuns()
-            ->whereNotNull('github_pull_request_number')
-            ->latest('attempt_number')
-            ->value('github_pull_request_number');
-        $path = strtolower(rtrim((string) parse_url($githubFeedbackUrl, PHP_URL_PATH), '/'));
-        $expected = strtolower('/'.$run->github_repository.'/pull/'.$pullRequestNumber);
-        if (! $pullRequestNumber || ($path !== $expected && ! str_starts_with($path, $expected.'/'))) {
-            throw new WorkflowConflict('The feedback URL must belong to the pull request bound to this workflow.');
-        }
-
-        return $githubFeedbackUrl;
     }
 
     private function assertGitHubIssue(string $repository, int $issueNumber, string $issueUrl): void
