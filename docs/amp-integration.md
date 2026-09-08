@@ -165,3 +165,12 @@ Production `RUN-0017` live-proved Milestone 6 against user-authorized documentat
 - Proof-only QA report: <https://github.com/jacovanc/Orc/issues/2#issuecomment-5583925014>
 
 The two completed agent attempts used distinct sandbox executors and each required exactly one delivered launch. QA completed only `proof_complete`; Laravel stopped at Human Review and neither Orc nor either agent merged or approved the pull request. The user later merged PR #3 directly on GitHub and separately approved the Orc Human Review, completing `RUN-0017` at Done. Public-repository operation is proven; private-repository access is not claimed.
+
+Production `RUN-0020` live-proved Milestone 7's substantive QA/remediation loop against transparent fixture issue <https://github.com/jacovanc/Orc/issues/6> and open, unmerged pull request <https://github.com/jacovanc/Orc/pull/7>:
+
+- Development 1: [thread](https://ampcode.com/threads/T-01a081e1-a3a9-73bd-b4d4-ded469d926b9), [report](https://github.com/jacovanc/Orc/issues/6#issuecomment-5588613133), exact initial PR head `ecb6f451eb8fae12d8e6c0e339021f934384ae04`.
+- QA 1: [fresh thread](https://ampcode.com/threads/T-01a081e5-0b33-72b0-8c6a-75c63c0d1abd), substantive [fail report](https://github.com/jacovanc/Orc/pull/7#issuecomment-5588643300) demonstrating the publicly declared missing criterion.
+- Development 2: [fresh thread](https://ampcode.com/threads/T-01a081e7-4f1f-7118-93f8-81e902152265), [remediation report](https://github.com/jacovanc/Orc/issues/6#issuecomment-5588691193), same PR updated to exact head `902cd159d9e01930123cfd08080af174be871d3c` after reading GitHub QA findings.
+- QA 2: [fresh thread](https://ampcode.com/threads/T-01a081ea-f3ba-7168-b8af-7afd5adc8396), substantive [pass report](https://github.com/jacovanc/Orc/pull/7#issuecomment-5588719376) covering every final criterion at the remediated head.
+
+Each agent attempt had exactly one claimed/delivered/completed launch and one accepted report/completion sequence. The run is waiting at Human Review; Orc did not approve or merge. The QA threads made no commits or pushes. This proves the public-repository path only and does not claim private-repository access.

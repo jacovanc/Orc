@@ -1,6 +1,6 @@
 # Milestone 7 design: independent substantive QA and remediation
 
-Status: proposed before implementation on 2026-09-08. Milestones 1–6 and workflow definitions v1/v2 remain immutable.
+Status: implemented and live-proven on 2026-09-08. Milestones 1–6 and workflow definitions v1/v2 remain immutable.
 
 ## Scope and non-goals
 
@@ -113,4 +113,11 @@ Automated coverage must prove:
 - controller agents extend the normal default mode with additive workflow tools and create `executor: "orb"` threads;
 - representative running QA, failed-QA remediation, blocked QA, and Human Review pages render truthful states.
 
-Live acceptance will use a new, transparent documentation-only issue in `jacovanc/Orc`. Its acceptance criteria will include a check that can genuinely detect an intentionally declared incomplete first Development increment. If the first implementation nevertheless satisfies all criteria, QA must pass honestly; the negative loop will then use a separate transparent bounded fixture rather than falsifying a result. Final acceptance requires Development attempt 1 → substantive QA fail → fresh Development attempt 2 reading GitHub findings → fresh substantive QA pass → Human Review, with the PR left unmerged.
+Live acceptance used transparent documentation-only issue [`jacovanc/Orc#6`](https://github.com/jacovanc/Orc/issues/6). Its public instructions explicitly required an incomplete first increment so QA could evaluate a real missing sentence without a hidden defect or fabricated result. Production `RUN-0020` followed the required sequence:
+
+1. Development attempt 1 created open PR [`#7`](https://github.com/jacovanc/Orc/pull/7) in fresh thread [`T-01a081e1-a3a9-73bd-b4d4-ded469d926b9`](https://ampcode.com/threads/T-01a081e1-a3a9-73bd-b4d4-ded469d926b9) and disclosed the intentionally incomplete increment in its [substantive report](https://github.com/jacovanc/Orc/issues/6#issuecomment-5588613133).
+2. Independent QA attempt 1 inspected exact head `ecb6f451eb8fae12d8e6c0e339021f934384ae04` in fresh thread [`T-01a081e5-0b33-72b0-8c6a-75c63c0d1abd`](https://ampcode.com/threads/T-01a081e5-0b33-72b0-8c6a-75c63c0d1abd), demonstrated the missing criterion, and published a substantive [fail report](https://github.com/jacovanc/Orc/pull/7#issuecomment-5588643300) without changing code.
+3. Development attempt 2 started fresh thread [`T-01a081e7-4f1f-7118-93f8-81e902152265`](https://ampcode.com/threads/T-01a081e7-4f1f-7118-93f8-81e902152265), read the GitHub finding, updated the same PR to head `902cd159d9e01930123cfd08080af174be871d3c`, and published its [remediation report](https://github.com/jacovanc/Orc/issues/6#issuecomment-5588691193).
+4. Independent QA attempt 2 started fresh thread [`T-01a081ea-f3ba-7168-b8af-7afd5adc8396`](https://ampcode.com/threads/T-01a081ea-f3ba-7168-b8af-7afd5adc8396), independently checked every criterion at that exact head, and published a substantive [pass report](https://github.com/jacovanc/Orc/pull/7#issuecomment-5588719376).
+
+The four StageRuns each have one claimed, delivered, completed `AmpLaunch`, one distinct thread/Orb, one report claim, one attested report, and one accepted completion. The run is waiting at Human Review. PR #7 is open, non-draft, cleanly mergeable, unmerged, and changes only `docs/independent-qa-evidence.md`; Orc performed no merge or human approval.
