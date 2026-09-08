@@ -215,6 +215,14 @@ class WorkflowEngine
                 throw new WorkflowConflict("Outcome '{$outcome}' is not permitted for {$attempt->stage->name}.");
             }
 
+            $destination = $transition->toStage;
+            if ($destination->workflow_definition_id !== $lockedRun->workflow_definition_id) {
+                throw new WorkflowConflict('The workflow definition contains an invalid cross-definition transition.');
+            }
+            if ($source === CompletionSource::HumanAction && $destination->type === StageType::Agent) {
+                $this->assertAmpTargetAuthorized($actor, $lockedRun->github_repository);
+            }
+
             $now = now();
             $attempt->forceFill([
                 'status' => StageRunStatus::Completed,
@@ -239,11 +247,6 @@ class WorkflowEngine
                 $eventMetadata['amp_event_id'] = $ampEventId;
             }
             $this->recordEvent($lockedRun, $attempt, 'stage.completed', $actor, $eventMetadata);
-
-            $destination = $transition->toStage;
-            if ($destination->workflow_definition_id !== $lockedRun->workflow_definition_id) {
-                throw new WorkflowConflict('The workflow definition contains an invalid cross-definition transition.');
-            }
 
             $lockedRun->current_stage_id = $destination->getKey();
 

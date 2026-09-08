@@ -3,6 +3,7 @@
 namespace Tests\Feature\Workflow;
 
 use App\Domain\Workflow\AmpLaunchStatus;
+use App\Domain\Workflow\Exceptions\WorkflowConflict;
 use App\Domain\Workflow\StageRunStatus;
 use App\Jobs\DeliverAmpLaunch;
 use App\Models\AmpLaunch;
@@ -200,6 +201,47 @@ class MilestoneSixTest extends TestCase
         $run->refresh()->load(['currentStage', 'activeStageRun']);
         $this->assertSame('human_review', $run->currentStage->key);
         $this->assertSame(StageRunStatus::Waiting, $run->activeStageRun->status);
+    }
+
+    public function test_human_action_rechecks_operator_allowlist_before_launching_another_agent(): void
+    {
+        $run = $this->completeDevelopmentSuccess();
+        $qa = $run->activeStageRun;
+        $launch = $qa->ampLaunch;
+        $thread = $this->threadId(2);
+        $this->claimAndAcknowledge($launch, $thread);
+        $this->report($launch, $thread, 303, 'proof');
+        $this->postCapability($launch->capability_secret, [
+            'action' => 'complete',
+            'thread_id' => $thread,
+            'outcome' => 'proof_complete',
+            'github_report_url' => 'https://github.com/acme/widgets/issues/42#issuecomment-303',
+        ])->assertOk();
+
+        $run->refresh()->load('activeStageRun');
+        $attempt = $run->activeStageRun;
+        $attemptCount = $run->stageRuns()->count();
+        $launchCount = AmpLaunch::query()->count();
+        config(['services.amp.allowed_user_emails' => []]);
+
+        try {
+            $this->engine->completeHumanAction(
+                $run,
+                $attempt,
+                'request_changes',
+                $this->user,
+                'https://github.com/acme/widgets/pull/17#discussion_r303',
+            );
+            $this->fail('A removed operator must not launch a new Development attempt.');
+        } catch (WorkflowConflict $exception) {
+            $this->assertStringContainsString('account is not authorized', $exception->getMessage());
+        }
+
+        $this->assertSame('human_review', $run->fresh()->currentStage->key);
+        $this->assertSame(StageRunStatus::Waiting, $attempt->fresh()->status);
+        $this->assertSame(1, $attempt->fresh()->active_slot);
+        $this->assertSame($attemptCount, $run->stageRuns()->count());
+        $this->assertSame($launchCount, AmpLaunch::query()->count());
     }
 
     public function test_blocked_review_retry_allocates_a_new_attempt_branch_and_capability(): void
