@@ -116,7 +116,9 @@ export default function (amp: PluginAPI) {
 	amp.on('agent.end', async (event) => agentEndSafetyNet(event, config))
 
 	void amp.createWebhook({
-		key: 'orc-stage-launch-v1',
+		// v2 intentionally rotates the registration after the v1 durable webhook
+		// retained its previously loaded proof-only handler across a plugin reload.
+		key: 'orc-stage-launch-v2',
 		headers: ['idempotency-key', 'x-orc-event-id', 'x-orc-timestamp', 'x-orc-signature'],
 		handler: async (event, ctx) => handleLaunch(event, ctx, config, proofAgent, developmentAgent, amp),
 	}).then((registration) => {

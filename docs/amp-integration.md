@@ -41,7 +41,7 @@ Generate two independent random values of at least 32 bytes. Never reuse a secre
 
 There is deliberately no GitHub credential in this file and no controller secret in the global worker or Amp project secrets. Without this file, the project plugin returns before registering a webhook, lifecycle hook, or controller agent mode; this separates untrusted coding Orbs from the trusted controller role.
 
-Reload the project plugin in the configured Amp-managed controller Orb. Re-registering key `orc-stage-launch-v1` restores the same durable webhook. The controller writes the capability URL to `.amp/runtime/launch-webhook-url` with mode `0600`; treat that URL like a secret.
+Reload the project plugin in the configured Amp-managed controller Orb. Registration key `orc-stage-launch-v2` deliberately replaced the proof-only v1 handler during Milestone 6 acceptance; future incompatible controller contracts must use another versioned key. The controller writes the capability URL to `.amp/runtime/launch-webhook-url` with mode `0600`; treat that URL like a secret and update Laravel's `AMP_LAUNCH_WEBHOOK_URL` whenever the registration key changes.
 
 Configure Laravel without exposing values:
 

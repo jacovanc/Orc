@@ -43,6 +43,7 @@ async function controllerHarness(testName: string) {
 	}))
 
 	let handler: ((event: any, ctx: any) => Promise<void>) | undefined
+	let webhookKey: string | undefined
 	let createThreadCalls = 0
 	let cancelled = 0
 	let prompted = 0
@@ -62,7 +63,8 @@ async function controllerHarness(testName: string) {
 		}),
 		registerAgentMode: () => undefined,
 		on: () => undefined,
-		createWebhook: async (config: { handler: typeof handler }) => {
+		createWebhook: async (config: { key: string; handler: typeof handler }) => {
+			webhookKey = config.key
 			handler = config.handler
 			return { url: 'https://amp.test/durable-webhook' }
 		},
@@ -73,6 +75,7 @@ async function controllerHarness(testName: string) {
 
 	return {
 		root,
+		webhookKey: () => webhookKey,
 		invoke: async (payload: Record<string, unknown>) => {
 			if (!handler) throw new Error('Controller did not register its webhook.')
 			const body = JSON.stringify(payload)
@@ -157,6 +160,7 @@ describe('Orc controller agent configuration', () => {
 
 	test('marks a claimed launch without a durable thread ambiguous instead of creating a duplicate Orb', async () => {
 		const harness = await controllerHarness('claimed-without-thread')
+		expect(harness.webhookKey()).toBe('orc-stage-launch-v2')
 		const callbackTypes: string[] = []
 		globalThis.fetch = (async (_input, init) => {
 			const payload = JSON.parse(String(init?.body))
