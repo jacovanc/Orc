@@ -17,6 +17,7 @@ class HumanActionRequest extends FormRequest
         return [
             'outcome' => ['required', 'string', 'max:80'],
             'github_feedback_url' => ['nullable', 'required_if:outcome,request_changes', 'url:https', 'max:2048'],
+            'github_feedback_confirmed' => ['nullable', 'required_if:outcome,request_changes', 'accepted'],
         ];
     }
 
@@ -27,15 +28,26 @@ class HumanActionRequest extends FormRequest
                 return;
             }
 
-            $host = strtolower((string) parse_url(
-                (string) $this->input('github_feedback_url'),
-                PHP_URL_HOST,
-            ));
+            $url = (string) $this->input('github_feedback_url');
+            $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+            $run = $this->route('workflowRun');
+            $publication = $run?->stageRuns()
+                ->whereNotNull('github_pull_request_number')
+                ->latest('attempt_number')
+                ->first();
+            $path = strtolower(rtrim((string) parse_url($url, PHP_URL_PATH), '/'));
+            $expected = $publication
+                ? strtolower('/'.$run->github_repository.'/pull/'.$publication->github_pull_request_number)
+                : null;
 
-            if (! in_array($host, ['github.com', 'www.github.com'], true)) {
+            if (
+                ! in_array($host, ['github.com', 'www.github.com'], true)
+                || ! $expected
+                || ($path !== $expected && ! str_starts_with($path, $expected.'/'))
+            ) {
                 $validator->errors()->add(
                     'github_feedback_url',
-                    'Feedback must be published on GitHub; enter its github.com URL.'
+                    'Enter a feedback or review URL from the pull request bound to this workflow.'
                 );
             }
         }];

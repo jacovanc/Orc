@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Workflow\CompleteAttemptRequest;
 use App\Http\Requests\Workflow\HumanActionRequest;
 use App\Http\Requests\Workflow\StartWorkflowRequest;
+use App\Models\Project;
 use App\Models\StageRun;
 use App\Models\WorkflowDefinition;
 use App\Models\WorkflowRun;
@@ -36,8 +37,22 @@ class WorkflowController extends Controller
         return view('workflows.index', compact('runs', 'counts'));
     }
 
-    public function create(): View
+    public function create(Request $request, ?Project $project = null): View|RedirectResponse
     {
+        if ($project) {
+            abort_unless($project->user_id === $request->user()->id, 404);
+            $project->load('currentConnection');
+        } else {
+            $projects = Project::query()->whereBelongsTo($request->user())->orderBy('name')->get();
+            if ($projects->count() === 1) {
+                return to_route('projects.workflows.create', $projects->first());
+            }
+            if ($projects->isEmpty()) {
+                return to_route('projects.index')->with('status', 'Create a project before starting a workflow.');
+            }
+
+            return view('workflows.choose-project', compact('projects'));
+        }
         $definitions = WorkflowDefinition::query()
             ->where('is_active', true)
             ->with('stages')
@@ -45,11 +60,12 @@ class WorkflowController extends Controller
             ->orderByDesc('version')
             ->get();
 
-        return view('workflows.create', compact('definitions'));
+        return view('workflows.create', compact('definitions', 'project'));
     }
 
-    public function store(StartWorkflowRequest $request): RedirectResponse
+    public function store(StartWorkflowRequest $request, Project $project): RedirectResponse
     {
+        abort_unless($project->user_id === $request->user()->id, 404);
         $definition = WorkflowDefinition::query()
             ->where('is_active', true)
             ->findOrFail($request->integer('workflow_definition_id'));
@@ -58,7 +74,7 @@ class WorkflowController extends Controller
             $run = $this->engine->start(
                 $request->user(),
                 $definition,
-                $request->string('github_repository')->toString(),
+                $project,
                 $request->integer('github_issue_number'),
                 $request->string('github_issue_url')->toString(),
             );
@@ -66,7 +82,7 @@ class WorkflowController extends Controller
             return back()->withInput()->withErrors(['workflow' => $exception->getMessage()]);
         }
 
-        return to_route('workflows.show', $run)->with('status', 'Workflow started.');
+        return to_route('workflows.show', $run)->with('status', 'Workflow started on the project’s verified controller connection.');
     }
 
     public function show(Request $request, WorkflowRun $workflowRun): View
@@ -79,6 +95,7 @@ class WorkflowController extends Controller
             'currentStage.outgoingTransitions',
             'activeStageRun.stage.outgoingTransitions',
             'activeStageRun.ampLaunch',
+            'project',
             'stageRuns.stage',
             'stageRuns.ampLaunch',
             'events.stageRun.stage',

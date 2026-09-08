@@ -12,6 +12,8 @@ class WorkflowRun extends Model
 {
     protected $fillable = [
         'user_id',
+        'project_id',
+        'amp_project_connection_id',
         'workflow_definition_id',
         'github_repository',
         'github_issue_number',
@@ -38,6 +40,16 @@ class WorkflowRun extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
+    }
+
+    public function ampProjectConnection(): BelongsTo
+    {
+        return $this->belongsTo(AmpProjectConnection::class);
     }
 
     public function definition(): BelongsTo

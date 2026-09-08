@@ -4,14 +4,21 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import controller from '../../.amp/plugins/orc-integration/index'
 
 const originalFetch = globalThis.fetch
+const originalAmpProjectId = process.env.AMP_PROJECT_ID
 
 afterEach(() => {
 	globalThis.fetch = originalFetch
+	process.env.AMP_PROJECT_ID = originalAmpProjectId
 })
 
 function launch(overrides: Record<string, unknown> = {}) {
 	return {
 		schema_version: 1,
+		project_id: 1,
+		connection_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+		amp_project_id: 'amp-project-test',
+		controller_key: 'orc-stage-launch-v7',
+		callback_url: 'https://orc.test/api/integrations/amp/connections/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		event_id: '11111111-1111-4111-8111-111111111111',
 		idempotency_key: '22222222-2222-4222-8222-222222222222',
 		stage_run_id: 41,
@@ -33,11 +40,13 @@ function launch(overrides: Record<string, unknown> = {}) {
 }
 
 async function controllerHarness(testName: string, holdResponses = false) {
+	process.env.AMP_PROJECT_ID = 'amp-project-test'
 	const root = `/tmp/orc-controller-${testName}`
 	rmSync(root, { recursive: true, force: true })
 	mkdirSync(`${root}/.amp/runtime`, { recursive: true })
 	writeFileSync(`${root}/.amp/runtime/orc-plugin.json`, JSON.stringify({
-		callbackUrl: 'https://orc.test/api/integrations/amp',
+		connectionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+		ampProjectId: 'amp-project-test',
 		launchSigningSecret: 'launch-secret',
 		callbackSigningSecret: 'callback-secret',
 	}))
@@ -118,11 +127,13 @@ async function controllerHarness(testName: string, holdResponses = false) {
 
 describe('Orc controller agent configuration', () => {
 	test('extends the normal medium agent and adds workflow tools without replacing defaults', async () => {
+		process.env.AMP_PROJECT_ID = 'amp-project-test'
 		const root = '/tmp/orc-controller-test-configured'
 		rmSync(root, { recursive: true, force: true })
 		mkdirSync(`${root}/.amp/runtime`, { recursive: true })
 		writeFileSync(`${root}/.amp/runtime/orc-plugin.json`, JSON.stringify({
-			callbackUrl: 'https://orc.test/api/integrations/amp',
+			connectionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+			ampProjectId: 'amp-project-test',
 			launchSigningSecret: 'launch-secret',
 			callbackSigningSecret: 'callback-secret',
 		}))
@@ -142,7 +153,7 @@ describe('Orc controller agent configuration', () => {
 		} as never)
 		await new Promise((resolve) => setTimeout(resolve, 0))
 
-		expect(agentConfigs).toHaveLength(3)
+		expect(agentConfigs).toHaveLength(4)
 		expect(modes.map((mode) => mode.key)).toEqual(['orc-proof-agent', 'orc-development-agent', 'orc-qa-agent'])
 		for (const config of agentConfigs) {
 			expect(config.extends).toBe('medium')
@@ -165,6 +176,7 @@ describe('Orc controller agent configuration', () => {
 		])
 		expect(agentConfigs[2].model).toBe('openai/gpt-5.6-sol')
 		expect(agentConfigs[2].instructions).toContain('Do not change implementation files')
+		expect(agentConfigs[3].tools.add).toEqual(['workflow_verify_project_connection'])
 		rmSync(root, { recursive: true, force: true })
 	})
 
@@ -184,7 +196,7 @@ describe('Orc controller agent configuration', () => {
 
 	test('marks a claimed launch without a durable thread ambiguous instead of creating a duplicate Orb', async () => {
 		const harness = await controllerHarness('claimed-without-thread')
-		expect(harness.webhookKey()).toBe('orc-stage-launch-v6')
+		expect(harness.webhookKey()).toBe('orc-stage-launch-v7')
 		const callbackTypes: string[] = []
 		globalThis.fetch = (async (_input, init) => {
 			const payload = JSON.parse(String(init?.body))

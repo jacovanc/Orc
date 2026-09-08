@@ -3,14 +3,15 @@
 namespace App\Jobs;
 
 use App\Models\AmpLaunch;
+use App\Services\AmpConnectionUrlGuard;
 use App\Services\AmpSignature;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use RuntimeException;
 use Throwable;
 
 class DeliverAmpCancellation implements ShouldBeUnique, ShouldQueue
@@ -38,7 +39,7 @@ class DeliverAmpCancellation implements ShouldBeUnique, ShouldQueue
         return 'cancel:'.$this->ampLaunchId;
     }
 
-    public function handle(AmpSignature $signature): void
+    public function handle(AmpSignature $signature, AmpConnectionUrlGuard $urlGuard): void
     {
         $launch = DB::transaction(function () {
             $locked = AmpLaunch::query()
@@ -65,10 +66,18 @@ class DeliverAmpCancellation implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $url = (string) config('services.amp.launch_webhook_url');
-        $secret = (string) config('services.amp.launch_signing_secret');
+        $launch->loadMissing('ampProjectConnection');
+        $url = (string) $launch->ampProjectConnection?->launch_webhook_url;
+        $secret = (string) $launch->ampProjectConnection?->launch_signing_secret;
         if ($url === '' || $secret === '') {
-            $this->mark($launch, 'failed', 'Amp cancellation configuration is incomplete.');
+            $this->mark($launch, 'failed', 'The bound Amp project connection is incomplete.');
+
+            return;
+        }
+        try {
+            $urlGuard->assertAllowed($url);
+        } catch (Throwable) {
+            $this->mark($launch, 'failed', 'The bound controller URL is not permitted.');
 
             return;
         }
@@ -81,6 +90,8 @@ class DeliverAmpCancellation implements ShouldBeUnique, ShouldQueue
             'launch_event_id' => $launch->event_id,
             'stage_run_id' => $launch->stage_run_id,
             'thread_id' => $launch->stageRun->amp_thread_id,
+            'connection_id' => $launch->ampProjectConnection->public_id,
+            'amp_project_id' => $launch->ampProjectConnection->amp_project_id,
         ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         $timestamp = now()->getTimestamp();
 
@@ -97,9 +108,9 @@ class DeliverAmpCancellation implements ShouldBeUnique, ShouldQueue
                 ->withBody($body, 'application/json')
                 ->post($url);
         } catch (ConnectionException $exception) {
-            $this->mark($launch, 'delivering', $exception->getMessage());
+            $this->mark($launch, 'delivering', 'The bound Amp controller could not be reached.');
 
-            throw $exception;
+            throw new RuntimeException('Transient Amp controller cancellation failure.');
         }
 
         if ($response->successful()) {
@@ -109,7 +120,7 @@ class DeliverAmpCancellation implements ShouldBeUnique, ShouldQueue
         }
         if ($response->status() === 408 || $response->status() === 429 || $response->serverError()) {
             $this->mark($launch, 'delivering', 'Retryable Amp cancellation response.');
-            throw new RequestException($response);
+            throw new RuntimeException('Retryable Amp controller cancellation response.');
         }
 
         $this->mark($launch, 'failed', 'Amp permanently rejected the cancellation command.');
@@ -119,7 +130,7 @@ class DeliverAmpCancellation implements ShouldBeUnique, ShouldQueue
     {
         $launch = AmpLaunch::query()->find($this->ampLaunchId);
         if ($launch && $launch->cancellation_status !== 'delivered') {
-            $this->mark($launch, 'ambiguous', $exception?->getMessage() ?: 'Cancellation delivery exhausted its retry budget.');
+            $this->mark($launch, 'ambiguous', 'Cancellation delivery exhausted its retry budget.');
         }
     }
 

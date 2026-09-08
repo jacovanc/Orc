@@ -91,6 +91,10 @@ class WorkflowEngineTest extends TestCase
         $run = $this->simulate($run, 'fail');
         $run = $this->simulate($run, 'success');
         $run = $this->simulate($run, 'pass');
+        $run->stageRuns()->where('attempt_number', 1)->update([
+            'github_pull_request_number' => 8,
+            'github_pull_request_url' => 'https://github.com/acme/widgets/pull/8',
+        ]);
         $run = $this->engine->completeHumanAction(
             $run,
             $run->activeStageRun,
@@ -285,7 +289,7 @@ class WorkflowEngineTest extends TestCase
         return $this->engine->start(
             $this->user,
             WorkflowDefinition::query()->where('version', 1)->sole(),
-            'acme/widgets',
+            $this->workflowProject($this->user, 'acme/widgets'),
             42,
             'https://github.com/acme/widgets/issues/42',
         );

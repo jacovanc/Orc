@@ -29,11 +29,12 @@ Do not infer private access from a public repository check. Verify a private tar
 
 ## Controller secret setup
 
-Generate two independent random values of at least 32 bytes. Never reuse a secret between directions. Store these only in gitignored `.amp/runtime/orc-plugin.json` in the webhook-hosting controller Orb with mode `0600`:
+Create an Orc Project first, then generate two independent random values of at least 32 bytes. Never reuse a secret between directions. Store these only in gitignored `.amp/runtime/orc-plugin.json` in the selected Amp project's webhook-hosting controller Orb with mode `0600`:
 
 ```json
 {
-  "callbackUrl": "https://your-orc.example/api/integrations/amp",
+  "connectionId": "public connection UUID shown by Orc",
+  "ampProjectId": "actual selected Amp project ID",
   "launchSigningSecret": "generated Laravel-to-Amp secret",
   "callbackSigningSecret": "different generated Amp-to-Laravel secret"
 }
@@ -41,23 +42,19 @@ Generate two independent random values of at least 32 bytes. Never reuse a secre
 
 There is deliberately no GitHub credential in this file and no controller secret in the global worker or Amp project secrets. Without this file, the project plugin returns before registering a webhook, lifecycle hook, or controller agent mode; this separates untrusted coding Orbs from the trusted controller role.
 
-Reload the project plugin in the configured Amp-managed controller Orb. Registration key `orc-stage-launch-v2` deliberately replaced the proof-only v1 handler during Milestone 6 acceptance; v3 added mandatory target-repository/default-branch verification after the live run exposed the initial Amp-hosted remote; v4 added the independent QA agent and prompts; v5 removed `agent.end` suppression during monitoring; v6 subscribes the transcript monitor before prompting after live evidence showed a fast first response could otherwise finish before `waitForResponse` subscribed. Future launch-behavior changes must use another versioned key because an existing durable capability can retain its previously loaded handler. The controller writes the capability URL to `.amp/runtime/launch-webhook-url` with mode `0600`; treat that URL like a secret and update Laravel's `AMP_LAUNCH_WEBHOOK_URL` whenever the registration key changes.
+Reload the project plugin in the configured Amp-managed controller Orb. Registration key v7 adds verified Project/connection routing and actual `AMP_PROJECT_ID` checks; earlier keys record the evolution through proof, real Development, QA, and monitor-race fixes. Future launch-behavior changes must use another versioned key because an existing durable capability can retain its loaded handler. The controller writes its capability URL to `.amp/runtime/launch-webhook-url` with mode `0600`; enter that URL and the same two secrets in the Orc Project settings. Orc creates an immutable connection version and encrypts these values.
 
 Configure Laravel without exposing values:
 
 ```dotenv
 QUEUE_CONNECTION=database
 AMP_INTEGRATION_ENABLED=true
-AMP_LAUNCH_WEBHOOK_URL=<durable controller webhook URL>
-AMP_LAUNCH_SIGNING_SECRET=<same launch secret>
-AMP_CALLBACK_SIGNING_SECRET=<same callback secret>
 AMP_SIGNATURE_TOLERANCE_SECONDS=300
-AMP_ALLOWED_REPOSITORIES=approved-owner/approved-repository
-AMP_ALLOWED_USER_EMAILS=approved-operator@example.com
+AMP_WEBHOOK_ALLOWED_HOSTS=ampcode.com
 REGISTRATION_ENABLED=false
 ```
 
-Both allowlists are mandatory and fail closed while integration is enabled. Repository matching is case-insensitive. The account allowlist prevents an authenticated Orc user from initiating work under the controller owner's native Amp identity. Orc rechecks both allowlists when a human action would enter another agent stage, so removing an operator or repository revokes retry/request-changes launch authority as well as new-run authority. Self-registration is source-default-disabled; keep `REGISTRATION_ENABLED=false` in production and provision operators separately. Enabling registration does not add an email to `AMP_ALLOWED_USER_EMAILS` and therefore cannot grant Amp launch authority by itself.
+Global webhook/secrets and email/repository allowlists are legacy migration inputs only. Current authority is an operator-controlled immutable `users.can_trigger_amp` flag plus owner-scoped Project and verified versioned connection. Orc rechecks authority whenever a human action enters another agent stage. Self-registration remains false in production; a newly registered account always lacks Amp authority, and changing profile email cannot acquire it.
 
 Run a supervised queue worker:
 
@@ -77,9 +74,9 @@ The capability is model-visible because the agent must supply it to the workflow
 
 ## Launch lifecycle
 
-1. Entering an agent stage creates an `AmpLaunch`, per-launch capability, report nonce, encrypted canonical body, and queue job in the same workflow transaction.
+1. Entering an agent stage creates an `AmpLaunch`, connection-version snapshot, per-launch capability, report nonce, encrypted canonical body, and queue job in the same workflow transaction.
 2. Every delivery retry sends the exact stored body, launch event ID, and idempotency key.
-3. The controller requests `launch.claim` before thread creation. Laravel grants the first current attempt only.
+3. The selected project-scoped controller checks its configured connection ID, expected project ID, and actual `AMP_PROJECT_ID`, then requests `launch.claim`. Laravel grants the first current attempt only.
 4. The controller creates one private `executor: "orb"` thread. It never recreates a claimed attempt.
 5. `launch.acknowledged` binds the exact thread. A rejected/stale acknowledgement causes the controller to cancel the unprompted thread.
 6. The controller confirms live context, checks the full transcript for `orc-stage-prompt:<launch-event>`, and appends the prompt only if absent.
@@ -138,9 +135,9 @@ Cancellation first closes Laravel's active slot and launch under locks, so late 
 
 1. Run `php artisan test --compact`, `vendor/bin/pint --test`, `composer validate --no-check-publish`, and `npm run build`.
 2. Run the controller and global-worker Bun tests and bundle both against external `@ampcode/plugin`.
-3. Confirm the trusted controller runtime file contains only the three documented names and has mode `0600`; never print values.
+3. Confirm each trusted controller runtime file contains only the four documented names and has mode `0600`; never print values.
 4. Confirm no obsolete Orc-owned GitHub or worker controller secrets remain in Amp project configuration.
-5. Verify production migration status, queue process, `/register` 404, and authenticated workflow v3 UI.
+5. Verify production migration status, queue process, `/register` 404, immutable account permission, Project connection status, and authenticated workflow v3 UI.
 6. Use issue `jacovanc/Orc#1` only for harmless integration proof. Do not use it for coding.
 7. For real Development proof, require a separately designated small issue; confirm the new thread ID, branch, open PR, report, checks, and transition to proof-only QA.
 8. For real QA proof, confirm the exact bound PR, substantive PR report, distinct QA thread/Orb, honest outcome, and no QA code publication or automatic human approval.

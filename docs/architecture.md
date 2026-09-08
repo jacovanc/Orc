@@ -33,7 +33,11 @@ A directed edge identified by `(workflow_definition_id, from_stage_id, outcome)`
 
 ### WorkflowRun
 
-One execution of a frozen definition for a GitHub repository and issue. It stores repository owner/name, issue number/URL, status, current stage, lifecycle timestamps, and no issue content.
+One execution of a frozen definition for a GitHub repository and issue. It snapshots its owner-scoped Project and immutable Amp controller connection version, then stores repository owner/name, issue number/URL, status, current stage, lifecycle timestamps, and no issue content. Later Project settings changes cannot move a run.
+
+### Project and AmpProjectConnection
+
+`Project` is one user's personal boundary for a canonical GitHub repository and explicit Amp project identity. `AmpProjectConnection` is an immutable numbered controller configuration with an encrypted durable webhook URL, encrypted directional secrets, status, and fresh-Orb verification evidence. `createThread` has no project selector, so correct placement comes from sending the launch to a controller registered inside the selected Amp project—not from fetching a repository in some other project.
 
 ### StageRun
 
@@ -105,7 +109,7 @@ Real QA uses a distinct `real_qa` mode and fresh Orb. Its context tool reads the
 
 Cancellation closes the Laravel attempt first, transactionally preventing any late completion. When a thread is already bound, Laravel also queues a signed, retryable command to the trusted controller to call `thread.cancel()` on that exact thread. External GitHub or Git operations already in flight may still finish and must be inspected.
 
-Self-registration is opt-in and source-default-disabled. Independently, when integration is enabled, workflow start fails closed unless both the normalized repository and initiating user's email are present in deployment-managed allowlists. This prevents a newly registered or otherwise unapproved application user from directing the owner's Amp/GitHub identity toward any target. Production registration is disabled, and a regression test proves that enabling registration alone does not grant launch authority.
+Self-registration is opt-in and source-default-disabled. Independently, workflow start and every human transition into an agent stage require the authenticated owner's immutable `users.can_trigger_amp` permission and the run's verified connection snapshot. New registrations default false, and profile/email changes never alter this permission. Production registration is disabled. Owner/project authorization, exact connection/thread/stage binding, and connection-scoped signatures prevent another account or controller from directing the owner's Amp identity.
 
 ## Current limitations
 

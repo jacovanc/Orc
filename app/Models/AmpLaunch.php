@@ -11,6 +11,7 @@ class AmpLaunch extends Model
 {
     protected $fillable = [
         'stage_run_id',
+        'amp_project_connection_id',
         'event_id',
         'idempotency_key',
         'report_nonce',
@@ -51,5 +52,10 @@ class AmpLaunch extends Model
     public function stageRun(): BelongsTo
     {
         return $this->belongsTo(StageRun::class);
+    }
+
+    public function ampProjectConnection(): BelongsTo
+    {
+        return $this->belongsTo(AmpProjectConnection::class);
     }
 }

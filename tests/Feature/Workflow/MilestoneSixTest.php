@@ -34,10 +34,9 @@ class MilestoneSixTest extends TestCase
         $this->seed(DevelopmentWorkflowSeeder::class);
         $this->engine = app(WorkflowEngine::class);
         $this->user = User::factory()->create();
+        $this->user->update(['can_trigger_amp' => true]);
         config([
             'services.amp.enabled' => true,
-            'services.amp.allowed_repositories' => ['acme/widgets'],
-            'services.amp.allowed_user_emails' => [$this->user->email],
         ]);
         Queue::fake();
     }
@@ -222,7 +221,7 @@ class MilestoneSixTest extends TestCase
         $attempt = $run->activeStageRun;
         $attemptCount = $run->stageRuns()->count();
         $launchCount = AmpLaunch::query()->count();
-        config(['services.amp.allowed_user_emails' => []]);
+        $this->user->update(['can_trigger_amp' => false]);
 
         try {
             $this->engine->completeHumanAction(
@@ -413,6 +412,7 @@ class MilestoneSixTest extends TestCase
             'schema_version' => 1,
             'event_id' => (string) Str::uuid(),
             'occurred_at' => now()->toISOString(),
+            'amp_project_id' => 'amp-project-test',
             ...$payload,
         ]);
     }
@@ -422,7 +422,7 @@ class MilestoneSixTest extends TestCase
         return $this->engine->start(
             $this->user,
             WorkflowDefinition::query()->where('version', 2)->sole(),
-            'acme/widgets',
+            $this->workflowProject($this->user, 'acme/widgets'),
             42,
             'https://github.com/acme/widgets/issues/42',
         );

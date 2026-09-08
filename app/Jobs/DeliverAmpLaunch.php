@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Domain\Workflow\AmpDeliveryStatus;
 use App\Domain\Workflow\AmpLaunchStatus;
 use App\Models\AmpLaunch;
+use App\Services\AmpConnectionUrlGuard;
 use App\Services\AmpLaunchPayload;
 use App\Services\AmpSignature;
 use App\Services\WorkflowEngine;
@@ -12,9 +13,9 @@ use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use RuntimeException;
 use Throwable;
 
 class DeliverAmpLaunch implements ShouldBeUnique, ShouldQueue
@@ -46,6 +47,7 @@ class DeliverAmpLaunch implements ShouldBeUnique, ShouldQueue
         AmpLaunchPayload $payloadFactory,
         AmpSignature $signature,
         WorkflowEngine $engine,
+        AmpConnectionUrlGuard $urlGuard,
     ): void {
         $launch = DB::transaction(function () {
             $locked = AmpLaunch::query()->lockForUpdate()->findOrFail($this->ampLaunchId);
@@ -86,10 +88,18 @@ class DeliverAmpLaunch implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $url = (string) config('services.amp.launch_webhook_url');
-        $secret = (string) config('services.amp.launch_signing_secret');
+        $launch->loadMissing('ampProjectConnection');
+        $url = (string) $launch->ampProjectConnection?->launch_webhook_url;
+        $secret = (string) $launch->ampProjectConnection?->launch_signing_secret;
         if ($url === '' || $secret === '') {
-            $engine->failAmpLaunchDelivery($launch, 'configuration', 'Amp launch configuration is incomplete.');
+            $engine->failAmpLaunchDelivery($launch, 'configuration', 'The bound Amp project connection is incomplete.');
+
+            return;
+        }
+        try {
+            $urlGuard->assertAllowed($url);
+        } catch (Throwable) {
+            $engine->failAmpLaunchDelivery($launch, 'unsafe_controller_url', 'The bound controller URL is not permitted.');
 
             return;
         }
@@ -118,9 +128,9 @@ class DeliverAmpLaunch implements ShouldBeUnique, ShouldQueue
                 ->withBody($body, 'application/json')
                 ->post($url);
         } catch (ConnectionException $exception) {
-            $this->recordTransientFailure($launch, 'network', $exception->getMessage());
+            $this->recordTransientFailure($launch, 'network', 'The bound Amp controller could not be reached.');
 
-            throw $exception;
+            throw new RuntimeException('Transient Amp controller delivery failure.');
         }
 
         if ($response->successful()) {
@@ -131,7 +141,7 @@ class DeliverAmpLaunch implements ShouldBeUnique, ShouldQueue
 
         if ($response->status() === 408 || $response->status() === 429 || $response->serverError()) {
             $this->recordTransientFailure($launch, 'http_'.$response->status(), 'Retryable Amp webhook response.');
-            throw new RequestException($response);
+            throw new RuntimeException('Retryable Amp controller response.');
         }
 
         $engine->failAmpLaunchDelivery(
@@ -152,7 +162,7 @@ class DeliverAmpLaunch implements ShouldBeUnique, ShouldQueue
         app(WorkflowEngine::class)->markAmpLaunchAmbiguous(
             $launch,
             'retry_exhausted',
-            $exception?->getMessage() ?: 'Amp launch delivery exhausted its retry budget.',
+            'Amp launch delivery exhausted its retry budget.',
         );
     }
 

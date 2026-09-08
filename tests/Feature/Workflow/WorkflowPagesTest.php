@@ -38,9 +38,9 @@ class WorkflowPagesTest extends TestCase
     {
         $definition = WorkflowDefinition::query()->where('version', 1)->sole();
 
-        $response = $this->actingAs($this->user)->post(route('workflows.store'), [
+        $project = $this->workflowProject($this->user, 'acme/widgets');
+        $response = $this->actingAs($this->user)->post(route('projects.workflows.store', $project), [
             'workflow_definition_id' => $definition->id,
-            'github_repository' => 'acme/widgets',
             'github_issue_number' => 18,
             'github_issue_url' => 'https://github.com/acme/widgets/issues/18',
         ]);
@@ -67,14 +67,13 @@ class WorkflowPagesTest extends TestCase
 
         foreach (['https://example.com/acme/widgets/issues/18', 'https://github.com/acme/other/issues/18'] as $url) {
             $this->actingAs($this->user)
-                ->from(route('workflows.create'))
-                ->post(route('workflows.store'), [
+                ->from(route('projects.workflows.create', $project = $this->workflowProject($this->user, 'acme/widgets')))
+                ->post(route('projects.workflows.store', $project), [
                     'workflow_definition_id' => $definition->id,
-                    'github_repository' => 'acme/widgets',
                     'github_issue_number' => 18,
                     'github_issue_url' => $url,
                 ])
-                ->assertRedirect(route('workflows.create'))
+                ->assertRedirect(route('projects.workflows.create', $project))
                 ->assertSessionHasErrors('github_issue_url');
         }
 
@@ -126,9 +125,8 @@ class WorkflowPagesTest extends TestCase
     {
         config([
             'services.amp.enabled' => true,
-            'services.amp.allowed_repositories' => ['acme/widgets'],
-            'services.amp.allowed_user_emails' => [$this->user->email],
         ]);
+        $this->user->update(['can_trigger_amp' => true]);
         Queue::fake();
         $run = $this->startRun();
         $attempt = $run->activeStageRun;
@@ -172,7 +170,7 @@ class WorkflowPagesTest extends TestCase
         return $this->engine->start(
             $this->user,
             WorkflowDefinition::query()->where('version', 1)->sole(),
-            'acme/widgets',
+            $this->workflowProject($this->user, 'acme/widgets'),
             18,
             'https://github.com/acme/widgets/issues/18',
         );

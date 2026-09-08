@@ -14,6 +14,7 @@ class AmpLaunchPayload
     public function make(AmpLaunch $launch): array
     {
         $launch->loadMissing([
+            'ampProjectConnection',
             'stageRun.stage.outgoingTransitions',
             'stageRun.workflowRun',
         ]);
@@ -30,6 +31,11 @@ class AmpLaunchPayload
 
         return [
             'schema_version' => 1,
+            'project_id' => $run->project_id,
+            'connection_id' => $launch->ampProjectConnection->public_id,
+            'amp_project_id' => $launch->ampProjectConnection->amp_project_id,
+            'controller_key' => $launch->ampProjectConnection->controller_key,
+            'callback_url' => url('/api/integrations/amp/connections/'.$launch->ampProjectConnection->public_id),
             'event_id' => $launch->event_id,
             'idempotency_key' => $launch->idempotency_key,
             'stage_run_id' => $attempt->getKey(),

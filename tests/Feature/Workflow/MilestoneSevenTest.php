@@ -31,10 +31,9 @@ class MilestoneSevenTest extends TestCase
         $this->seed(DevelopmentWorkflowSeeder::class);
         $this->engine = app(WorkflowEngine::class);
         $this->user = User::factory()->create();
+        $this->user->update(['can_trigger_amp' => true]);
         config([
             'services.amp.enabled' => true,
-            'services.amp.allowed_repositories' => ['acme/widgets'],
-            'services.amp.allowed_user_emails' => [$this->user->email],
         ]);
         Queue::fake();
     }
@@ -368,6 +367,7 @@ class MilestoneSevenTest extends TestCase
             'schema_version' => 1,
             'event_id' => (string) Str::uuid(),
             'occurred_at' => now()->toISOString(),
+            'amp_project_id' => 'amp-project-test',
             ...$payload,
         ]);
     }
@@ -377,7 +377,7 @@ class MilestoneSevenTest extends TestCase
         return $this->engine->start(
             $this->user,
             WorkflowDefinition::query()->where('version', 3)->sole(),
-            'acme/widgets',
+            $this->workflowProject($this->user, 'acme/widgets'),
             42,
             'https://github.com/acme/widgets/issues/42',
         );

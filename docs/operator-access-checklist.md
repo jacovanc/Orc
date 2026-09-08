@@ -7,15 +7,16 @@ Amp-backed workflows.
 
 - [ ] Keep production self-registration disabled. Provision each account as an
   operator action through the approved administrative process.
-- [ ] Confirm the administrator's email is included in
-  `AMP_ALLOWED_USER_EMAILS`.
-- [ ] Confirm every repository the administrator may use is included in
-  `AMP_ALLOWED_REPOSITORIES`.
+- [ ] Grant `users.can_trigger_amp=true` to the exact existing account through
+  an operator-controlled database/admin process; do not derive it from email.
+- [ ] Confirm each owner-scoped Orc Project has the intended canonical
+  repository and verified versioned Amp controller connection.
 
-The two allowlists are independent requirements. An account can trigger an Amp
-launch only when its email passes `AMP_ALLOWED_USER_EMAILS` **and** the target
-repository passes `AMP_ALLOWED_REPOSITORIES`. Membership in one allowlist does
-not bypass the other.
+Registration and launch permission are independent. New accounts always default
+to `can_trigger_amp=false`, and changing a profile email cannot change launch
+authority. A permitted account can launch only through a Project it owns and a
+connection whose fresh child proved the exact Amp project identity and native
+read access to its canonical repository.
 
 ## Repository credentials
 
@@ -28,18 +29,14 @@ Orc never provisions, copies, or displays GitHub credentials.
 
 ## Safe verification
 
-Run checks inside the target production environment or Orb. Report only the
-configuration name and whether it is non-empty; never print, paste, or log the
-configuration value:
+Run checks inside the target production environment. Report only booleans,
+non-secret IDs, and status; never print encrypted controller values:
 
 ```sh
-for name in AMP_ALLOWED_USER_EMAILS AMP_ALLOWED_REPOSITORIES; do
-  if [ -n "$(printenv "$name")" ]; then
-    printf '%s: non-empty\n' "$name"
-  else
-    printf '%s: empty or unset\n' "$name"
-  fi
-done
+php artisan tinker --execute="dump(
+  App\\Models\\User::where('email', 'operator@example.com')->value('can_trigger_amp'),
+  App\\Models\\Project::with('currentConnection:id,project_id,public_id,status,verified_at')->get(['id','user_id','github_repository','current_amp_project_connection_id'])
+);"
 ```
 
 Confirm native authentication without displaying credential material:
@@ -58,9 +55,9 @@ else
 fi
 ```
 
-Finally, verify with a non-destructive access check against one explicitly
-allowed repository and one repository that is not allowed. Confirm that the
-allowed combination can start the workflow and that changing either the user
-email or repository to a non-allowed value blocks launch. Record only pass/fail
-status; do not record allowlist contents, tokens, credential output, or other
-secret values.
+Finally, run **Verify in fresh Orb** for the Project. Confirm the returned thread
+belongs to the intended Amp project and native `gh` can read the canonical
+repository. Confirm another account receives 404 for the Project, and an account
+without `can_trigger_amp` cannot configure, verify, start, retry, or request
+changes into a new agent stage. Record no token, credential output, webhook URL,
+or directional secret.

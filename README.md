@@ -2,10 +2,10 @@
 
 Orc is a Laravel-native workflow orchestrator for software delivery. It coordinates agent stages, QA loops, and human approval while keeping requirements, code, discussion, feedback, and reports in GitHub.
 
-Milestones 1–7 are implemented as an authenticated, server-rendered application with durable Laravel↔Amp orchestration, real Development, and independent substantive QA. Read the [domain and architecture](docs/architecture.md), [Amp integration runbook](docs/amp-integration.md), [Milestone 6 design](docs/milestone-6-design.md), and [Milestone 7 design](docs/milestone-7-design.md) before extending the workflow engine.
+Milestones 1–7 and personal Projects are implemented as an authenticated, server-rendered application with durable Laravel↔Amp orchestration, real Development, independent substantive QA, and verified per-Amp-project routing. Read the [domain and architecture](docs/architecture.md), [Amp integration runbook](docs/amp-integration.md), and [Project routing design](docs/project-routing-design.md) before extending the workflow engine.
 
 Before allowing an administrator to start Amp-backed workflows, complete the
-[operator access onboarding checklist](docs/operator-access-checklist.md).
+[operator access onboarding checklist](docs/operator-access-checklist.md). The next architecture phase is specified in the [Project management and Amp routing design](docs/project-routing-design.md); sequencing and explicitly deferred work are in the [roadmap](docs/future-roadmap.md).
 
 ## What is included
 
@@ -19,6 +19,7 @@ Before allowing an administrator to start Amp-backed workflows, complete the
 - Independent QA bound to the exact Development pull request, including fresh issue/PR/review/CI reads, substantive PR reports, fail-to-remediation loops, and a human gate for blocked verdicts.
 - Explicit agent simulation controls when the integration is disabled, so orchestration can still be exercised without Amp.
 - Laravel Breeze authentication and owner-scoped workflow access.
+- Personal Projects with a canonical GitHub repository, explicit Amp project identity, immutable versioned controller connections, per-project run/start/settings pages, and an all-project run overview.
 
 ## Source-of-truth boundary
 
@@ -34,14 +35,14 @@ Orc does **not** store issue bodies, prompts, generated code, reports, discussio
 
 ## Amp integration setup
 
-The integration is disabled by default. It requires a database queue worker and two independent, randomly generated HMAC secrets—one for Laravel→Amp launches and another for Amp→Laravel callbacks.
+The integration is disabled by default. It requires a database queue worker and one trusted controller registered inside every Amp project Orc should route to. Each Project connection uses two independent random HMAC secrets—one for Laravel→controller requests and another for controller→Laravel callbacks.
 
-1. Put the callback base URL and secrets in the gitignored `.amp/runtime/orc-plugin.json` with owner-only permissions.
+1. Create the Orc Project with its canonical `owner/repository` and the selected Amp project's actual `AMP_PROJECT_ID`.
 2. Install the `orc-worker` User Plugin. It adds stage-bound workflow tools and does not need or read project secrets.
-3. Reload the checked-in `.amp/plugins/orc-integration` controller plugin from an Amp-managed Orb. It writes its durable capability URL to gitignored `.amp/runtime/launch-webhook-url`.
-4. Configure the matching Laravel variables listed in `.env.example`, including fail-closed `AMP_ALLOWED_REPOSITORIES` and `AMP_ALLOWED_USER_EMAILS`, set `QUEUE_CONNECTION=database`, and run a worker for the `amp-launches` queue.
-5. Enable `AMP_INTEGRATION_ENABLED` only after both callback and launch directions are configured.
-6. Confirm every target repository is already accessible through native `git` and `gh` authentication in a fresh Orb. Orc never provisions, copies, or repairs GitHub access.
+3. Generate two different secrets and put them with the Project's connection ID and Amp project ID in that Amp project's gitignored, mode-`0600` `.amp/runtime/orc-plugin.json`.
+4. Reload the checked-in `.amp/plugins/orc-integration` controller from that selected Amp project. Copy its durable webhook URL into the matching Orc Project settings with the same two secrets; Orc encrypts all three values and never redisplays them.
+5. Run the Project's **Verify in fresh Orb** action. It checks actual child placement and read-only native `gh` access to the canonical repository. Repeat these steps independently for every Project/Amp project.
+6. Set `QUEUE_CONNECTION=database`, run a worker for `amp-launches`, and enable `AMP_INTEGRATION_ENABLED` only after setup. No global GitHub token, repository allowlist, or mutable-email authority is used.
 
 Never commit, log, or show the directional secrets, per-launch capabilities, or webhook URL. Orc does not own a GitHub token. Exact configuration, rotation, failure handling, and trust boundaries are in [docs/amp-integration.md](docs/amp-integration.md).
 
@@ -60,7 +61,7 @@ npm run build
 php artisan serve
 ```
 
-Self-registration is disabled by default. For local-only evaluation, explicitly set `REGISTRATION_ENABLED=true`, create an account through `/register`, then start a workflow using a matching GitHub repository, issue number, and issue URL. Never enable public registration in a shared Amp-backed deployment; even when registration is enabled, only accounts and repositories in the Amp allowlists may launch work.
+Self-registration is disabled by default. For local-only evaluation, explicitly set `REGISTRATION_ENABLED=true` and create an account through `/register`. New accounts always have `can_trigger_amp=false`; an operator must separately grant that immutable account permission before it can configure a controller or launch an agent. Never enable public registration in a shared Amp-backed deployment.
 
 For local asset development, run `npm run dev` alongside the Laravel server.
 
@@ -94,12 +95,13 @@ Deployment status and exact verification evidence are recorded in [IMPLEMENTATIO
 ## Current limitations
 
 - Workflow definition v1 retains the harmless Development/QA integration proof. Definition v2 retains live-proven real Development with explicitly proof-only QA. Definition v3 adds independent substantive QA with `pass|fail|blocked` and remediation/operator loops.
-- Self-registration is source-default-disabled and production returns 404 for `/register`. Amp launches independently fail closed unless both the repository and initiating user are explicitly allowlisted, so enabling registration alone cannot grant access to the owner's Amp account.
+- Self-registration is source-default-disabled and production returns 404 for `/register`. Amp launches independently require the authenticated owner's immutable `can_trigger_amp` permission and a verified Project connection, so registration or profile-email changes cannot grant access to the owner's Amp account.
 - Agents retain normal Amp shell, editing, web, MCP, and other default tools. Orc adds workflow tools and enforces authority at Laravel's orchestration boundary rather than by suppressing tools.
 - A per-launch capability replaces broad callback credentials in fresh coding Orbs. It is bound to one attempt/thread and cannot grant repository access.
 - Reports use an unguessable per-launch nonce, native GitHub author checks, paginated reconciliation, and durable Laravel attestation before completion.
 - A crash in the narrow interval after Amp creates a thread but before Laravel receives its thread ID leaves the launch claimed for manual reconciliation. Orc deliberately does not risk a duplicate Orb.
 - Change feedback must be published manually on GitHub; Orc stores its URL only.
+- Project connection changes create new versions. Existing runs, retries, QA, reconciliation, and cancellation stay bound to their original connection. A real second-project placement proof still requires a second user-configured Amp project.
 - There is no workflow editor. Definitions are seeded and versioned in code/database.
 - Real Development has a completed controlled public-repository acceptance on documentation issue `jacovanc/Orc#2`; Orc left its pull request open, the user merged it directly on GitHub, then separately approved the Orc Human Review. This does not prove private-repository operation.
 - QA has normal tools for inspection/testing but no Orc publication capability and is instructed never to change/push implementation. Native repository permissions are user-owned, so this is a workflow rule rather than a fake sandbox boundary.

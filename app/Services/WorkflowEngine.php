@@ -15,6 +15,8 @@ use App\Jobs\DeliverAmpLaunch;
 use App\Jobs\ReconcileAmpLaunch;
 use App\Models\AmpIntegrationEvent;
 use App\Models\AmpLaunch;
+use App\Models\AmpProjectConnection;
+use App\Models\Project;
 use App\Models\StageRun;
 use App\Models\User;
 use App\Models\WorkflowDefinition;
@@ -31,16 +33,19 @@ class WorkflowEngine
     public function start(
         User $actor,
         WorkflowDefinition $definition,
-        string $githubRepository,
+        Project $project,
         int $githubIssueNumber,
         string $githubIssueUrl,
     ): WorkflowRun {
+        $githubRepository = $project->github_repository;
         $this->assertGitHubIssue($githubRepository, $githubIssueNumber, $githubIssueUrl);
-        $this->assertAmpTargetAuthorized($actor, $githubRepository);
+        $connection = $this->assertAmpTargetAuthorized($actor, $project);
 
         return DB::transaction(function () use (
             $actor,
             $definition,
+            $project,
+            $connection,
             $githubRepository,
             $githubIssueNumber,
             $githubIssueUrl,
@@ -61,6 +66,8 @@ class WorkflowEngine
             $now = now();
             $run = WorkflowRun::query()->create([
                 'user_id' => $actor->getKey(),
+                'project_id' => $project->getKey(),
+                'amp_project_connection_id' => $connection?->getKey(),
                 'workflow_definition_id' => $lockedDefinition->getKey(),
                 'github_repository' => $githubRepository,
                 'github_issue_number' => $githubIssueNumber,
@@ -182,7 +189,7 @@ class WorkflowEngine
 
             $this->assertSourceMatchesStage($source, $attempt->stage);
             $feedbackUrl = $source === CompletionSource::HumanAction
-                ? $this->validateFeedback($outcome, $githubReferenceUrl)
+                ? $this->validateFeedback($lockedRun, $outcome, $githubReferenceUrl)
                 : null;
 
             if ($attempt->status === StageRunStatus::Completed) {
@@ -220,7 +227,7 @@ class WorkflowEngine
                 throw new WorkflowConflict('The workflow definition contains an invalid cross-definition transition.');
             }
             if ($source === CompletionSource::HumanAction && $destination->type === StageType::Agent) {
-                $this->assertAmpTargetAuthorized($actor, $lockedRun->github_repository);
+                $this->assertRunAmpAuthorized($lockedRun, $actor);
             }
 
             $now = now();
@@ -345,8 +352,15 @@ class WorkflowEngine
         }, 3);
     }
 
-    public function handleAmpCallback(array $payload, string $payloadHash): array
-    {
+    public function handleAmpCallback(
+        array $payload,
+        string $payloadHash,
+        ?AmpProjectConnection $connection = null,
+    ): array {
+        if ($connection) {
+            $this->assertPayloadConnection($payload, $connection);
+            $this->assertCallbackLaunchConnection($payload, $connection);
+        }
         try {
             return DB::transaction(function () use ($payload, $payloadHash) {
                 $existing = AmpIntegrationEvent::query()
@@ -409,8 +423,12 @@ class WorkflowEngine
         }
     }
 
-    public function ampContext(string $threadId): array
-    {
+    public function ampContext(
+        string $threadId,
+        ?AmpProjectConnection $connection = null,
+        ?string $ampProjectId = null,
+        ?string $connectionId = null,
+    ): array {
         $attempt = StageRun::query()
             ->with(['stage.outgoingTransitions', 'workflowRun', 'ampLaunch'])
             ->where('amp_thread_id', $threadId)
@@ -419,10 +437,16 @@ class WorkflowEngine
         if (! $attempt || ! $attempt->ampLaunch) {
             throw new WorkflowConflict('This thread is not bound to an Orc stage attempt.');
         }
+        if ($connection) {
+            $this->assertLaunchConnection($attempt->ampLaunch, $connection, $ampProjectId, $connectionId);
+        }
         $priorPublication = $this->priorPublication($attempt);
 
         return [
             'schema_version' => 1,
+            'project_id' => $attempt->workflowRun->project_id,
+            'amp_project_id' => $attempt->ampLaunch->ampProjectConnection?->amp_project_id,
+            'connection_id' => $attempt->ampLaunch->ampProjectConnection?->public_id,
             'idempotency_key' => $attempt->ampLaunch->idempotency_key,
             'launch_event_id' => $attempt->ampLaunch->event_id,
             'stage_run_id' => $attempt->getKey(),
@@ -453,10 +477,11 @@ class WorkflowEngine
         ];
     }
 
-    public function stageCapabilityContext(string $token, string $threadId): array
+    public function stageCapabilityContext(string $token, string $threadId, string $ampProjectId): array
     {
         $launch = $this->capabilityLaunch($token);
         $this->assertMatchingAmpThread($launch->stageRun, $threadId);
+        $this->assertWorkerProject($launch, $ampProjectId);
 
         return $this->ampContext($threadId);
     }
@@ -464,6 +489,7 @@ class WorkflowEngine
     public function handleStageCapability(string $token, array $payload, string $payloadHash): array
     {
         $launch = $this->capabilityLaunch($token);
+        $this->assertWorkerProject($launch, $payload['amp_project_id']);
         $type = match ($payload['action']) {
             'report' => 'stage.reported',
             'report_claim' => 'stage.report_claimed',
@@ -480,7 +506,8 @@ class WorkflowEngine
             'stage_run_id' => $launch->stage_run_id,
             'report_nonce' => $launch->report_nonce,
             'capability_authenticated' => true,
-        ], $payloadHash);
+            'connection_id' => $launch->ampProjectConnection->public_id,
+        ], $payloadHash, $launch->ampProjectConnection);
     }
 
     public function failAmpLaunchDelivery(
@@ -1071,6 +1098,7 @@ class WorkflowEngine
         $launch = AmpLaunch::query()->firstOrCreate(
             ['stage_run_id' => $attempt->getKey()],
             [
+                'amp_project_connection_id' => $run->amp_project_connection_id,
                 'event_id' => (string) Str::uuid(),
                 'idempotency_key' => (string) Str::uuid(),
                 'report_nonce' => bin2hex(random_bytes(32)),
@@ -1159,7 +1187,7 @@ class WorkflowEngine
         }
     }
 
-    private function validateFeedback(string $outcome, ?string $githubFeedbackUrl): ?string
+    private function validateFeedback(WorkflowRun $run, string $outcome, ?string $githubFeedbackUrl): ?string
     {
         if ($outcome !== 'request_changes') {
             return null;
@@ -1169,6 +1197,16 @@ class WorkflowEngine
             throw new WorkflowConflict(
                 'Requesting changes requires the URL of feedback already published on GitHub.'
             );
+        }
+
+        $pullRequestNumber = $run->stageRuns()
+            ->whereNotNull('github_pull_request_number')
+            ->latest('attempt_number')
+            ->value('github_pull_request_number');
+        $path = strtolower(rtrim((string) parse_url($githubFeedbackUrl, PHP_URL_PATH), '/'));
+        $expected = strtolower('/'.$run->github_repository.'/pull/'.$pullRequestNumber);
+        if (! $pullRequestNumber || ($path !== $expected && ! str_starts_with($path, $expected.'/'))) {
+            throw new WorkflowConflict('The feedback URL must belong to the pull request bound to this workflow.');
         }
 
         return $githubFeedbackUrl;
@@ -1188,23 +1226,96 @@ class WorkflowEngine
         }
     }
 
-    private function assertAmpTargetAuthorized(User $actor, string $repository): void
+    private function assertAmpTargetAuthorized(User $actor, Project $project): ?AmpProjectConnection
+    {
+        if (! config('services.amp.enabled')) {
+            if ($project->user_id !== $actor->id) {
+                throw new WorkflowConflict('You do not own this project.');
+            }
+
+            return null;
+        }
+        if ($project->user_id !== $actor->id) {
+            throw new WorkflowConflict('You do not own this project.');
+        }
+        if (! $actor->can_trigger_amp) {
+            throw new WorkflowConflict('Your account is not authorized for Amp workflow execution.');
+        }
+        $connection = $project->currentConnection()->first();
+        if (! $connection || ! $connection->isReady()) {
+            throw new WorkflowConflict('This project does not have a verified Amp controller connection.');
+        }
+        if ($connection->amp_project_id !== $project->amp_project_id) {
+            throw new WorkflowConflict('This project connection does not match the configured Amp project.');
+        }
+
+        return $connection;
+    }
+
+    private function assertRunAmpAuthorized(WorkflowRun $run, User $actor): void
     {
         if (! config('services.amp.enabled')) {
             return;
         }
-
-        $repositories = collect(config('services.amp.allowed_repositories', []))
-            ->map(fn (string $allowed): string => strtolower($allowed));
-        $users = collect(config('services.amp.allowed_user_emails', []))
-            ->map(fn (string $email): string => strtolower($email));
-
-        if ($repositories->isEmpty() || ! $repositories->contains(strtolower($repository))) {
-            throw new WorkflowConflict('This repository is not authorized for Amp workflow execution.');
-        }
-
-        if ($users->isEmpty() || ! $users->contains(strtolower($actor->email))) {
+        if (! $actor->can_trigger_amp) {
             throw new WorkflowConflict('Your account is not authorized for Amp workflow execution.');
+        }
+        $project = $run->project;
+        $connection = $run->ampProjectConnection;
+        if (
+            ! $project
+            || $project->user_id !== $actor->id
+            || ! $connection
+            || $connection->project_id !== $project->id
+            || ! $connection->isReady()
+        ) {
+            throw new WorkflowConflict('This workflow is not bound to a verified project connection.');
+        }
+    }
+
+    private function assertPayloadConnection(array $payload, AmpProjectConnection $connection): void
+    {
+        if (
+            ($payload['connection_id'] ?? null) !== $connection->public_id
+            || ($payload['amp_project_id'] ?? null) !== $connection->amp_project_id
+        ) {
+            throw new WorkflowConflict('The callback does not match this Amp project connection.');
+        }
+    }
+
+    private function assertCallbackLaunchConnection(array $payload, AmpProjectConnection $connection): void
+    {
+        $launchConnectionId = AmpLaunch::query()
+            ->where('idempotency_key', $payload['idempotency_key'])
+            ->where('event_id', $payload['launch_event_id'])
+            ->where('stage_run_id', $payload['stage_run_id'])
+            ->value('amp_project_connection_id');
+
+        if ($launchConnectionId !== null && (int) $launchConnectionId !== $connection->id) {
+            throw new WorkflowConflict('The callback launch belongs to a different Amp project connection.');
+        }
+    }
+
+    private function assertLaunchConnection(
+        AmpLaunch $launch,
+        AmpProjectConnection $connection,
+        ?string $ampProjectId,
+        ?string $connectionId,
+    ): void {
+        if (
+            $launch->amp_project_connection_id !== $connection->id
+            || $connectionId !== $connection->public_id
+            || $ampProjectId !== $connection->amp_project_id
+        ) {
+            throw new WorkflowConflict('This thread is bound to a different Amp project connection.');
+        }
+    }
+
+    private function assertWorkerProject(AmpLaunch $launch, string $ampProjectId): void
+    {
+        $connection = $launch->ampProjectConnection;
+        if (! $connection || $connection->amp_project_id !== $ampProjectId) {
+            throw new WorkflowConflict('This worker Orb does not belong to the project bound to the workflow.');
         }
     }
 

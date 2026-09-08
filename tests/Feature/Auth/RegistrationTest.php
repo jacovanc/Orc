@@ -3,6 +3,7 @@
 namespace Tests\Feature\Auth;
 
 use App\Jobs\DeliverAmpLaunch;
+use App\Models\Project;
 use App\Models\WorkflowDefinition;
 use Database\Seeders\DevelopmentWorkflowSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -62,19 +63,20 @@ class RegistrationTest extends TestCase
         ])->assertRedirect(route('dashboard', absolute: false));
 
         $this->seed(DevelopmentWorkflowSeeder::class);
-        config([
-            'services.amp.enabled' => true,
-            'services.amp.allowed_repositories' => ['acme/widgets'],
-            'services.amp.allowed_user_emails' => ['approved-operator@example.com'],
-        ]);
+        config(['services.amp.enabled' => true]);
         Queue::fake();
 
-        $this->from(route('workflows.create'))->post(route('workflows.store'), [
-            'workflow_definition_id' => WorkflowDefinition::query()->where('version', 2)->sole()->id,
+        $project = Project::query()->create([
+            'user_id' => auth()->id(),
+            'name' => 'Widgets',
             'github_repository' => 'acme/widgets',
+            'amp_project_id' => 'amp-project-test',
+        ]);
+        $this->from(route('projects.workflows.create', $project))->post(route('projects.workflows.store', $project), [
+            'workflow_definition_id' => WorkflowDefinition::query()->where('version', 2)->sole()->id,
             'github_issue_number' => 42,
             'github_issue_url' => 'https://github.com/acme/widgets/issues/42',
-        ])->assertRedirect(route('workflows.create'))
+        ])->assertRedirect(route('projects.workflows.create', $project))
             ->assertSessionHasErrors('workflow');
 
         $this->assertDatabaseCount('workflow_runs', 0);

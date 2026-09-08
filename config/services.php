@@ -41,11 +41,12 @@ return [
         'launch_signing_secret' => env('AMP_LAUNCH_SIGNING_SECRET'),
         'callback_signing_secret' => env('AMP_CALLBACK_SIGNING_SECRET'),
         'signature_tolerance_seconds' => (int) env('AMP_SIGNATURE_TOLERANCE_SECONDS', 300),
-        'allowed_repositories' => array_values(array_filter(array_map(
+        'project_identity' => env('AMP_PROJECT_IDENTITY', 'legacy-unverified'),
+        'webhook_allowed_hosts' => array_values(array_filter(array_map(
             'trim',
-            explode(',', (string) env('AMP_ALLOWED_REPOSITORIES', '')),
+            explode(',', (string) env('AMP_WEBHOOK_ALLOWED_HOSTS', 'ampcode.com')),
         ))),
-        'allowed_user_emails' => array_values(array_filter(array_map(
+        'legacy_operator_emails' => array_values(array_filter(array_map(
             'trim',
             explode(',', (string) env('AMP_ALLOWED_USER_EMAILS', '')),
         ))),

@@ -18,7 +18,7 @@
 
     <div class="flex flex-col justify-between gap-6 lg:flex-row lg:items-start">
         <div>
-            <a href="{{ route('workflows.index') }}" class="inline-flex items-center gap-2 text-sm text-zinc-600 transition hover:text-zinc-300"><span>←</span> Workflows</a>
+            <a href="{{ $run->project ? route('projects.show', $run->project) : route('workflows.index') }}" class="inline-flex items-center gap-2 text-sm text-zinc-600 transition hover:text-zinc-300"><span>←</span> {{ $run->project?->name ?? 'Workflows' }}</a>
             <div class="mt-6 flex flex-wrap items-center gap-3">
                 <span class="status-pill status-{{ $run->status->value }}">{{ $run->status->value }}</span>
                 <span class="font-mono text-xs text-zinc-700">RUN-{{ str_pad($run->id, 4, '0', STR_PAD_LEFT) }}</span>
@@ -183,7 +183,7 @@
                                     <input type="hidden" name="outcome" value="request_changes">
                                     <label class="field-label" for="github_feedback_url">GitHub feedback URL</label>
                                     <input class="field-input" type="url" name="github_feedback_url" id="github_feedback_url" placeholder="https://github.com/owner/repo/pull/…#discussion_r…" required>
-                                    <p class="field-help">Required. Orc stores this link, never the feedback text.</p>
+                                    <label class="mt-4 flex items-start gap-3 text-xs leading-5 text-zinc-400"><input class="mt-1" type="checkbox" name="github_feedback_confirmed" value="1" required><span>I confirm that I published the requested changes on the bound GitHub pull request. Orc stores only the URL, never the feedback text.</span></label>
                                     <button class="button-quiet mt-4 border border-white/10" type="submit">Request changes <span class="text-zinc-600">→ Development</span></button>
                                 </form>
                             @elseif ($transition->outcome === 'approve')

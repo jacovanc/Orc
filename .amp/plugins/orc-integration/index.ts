@@ -17,13 +17,19 @@ import { join } from 'node:path'
 export const description = 'Launches Orc proof or Development agents in fresh Orbs with stage-bound, retry-safe workflow callbacks.'
 
 type RuntimeConfig = {
-	callbackUrl: string
+	connectionId: string
+	ampProjectId: string
 	launchSigningSecret: string
 	callbackSigningSecret: string
 }
 
 type LaunchPayload = {
 	schema_version: 1
+	project_id: number
+	connection_id: string
+	amp_project_id: string
+	controller_key: string
+	callback_url: string
 	event_id: string
 	idempotency_key: string
 	stage_run_id: number
@@ -119,6 +125,12 @@ export default function (amp: PluginAPI) {
 		},
 		display: { label: 'Orc independent QA', color: '#a78bfa' },
 	})
+	const verificationAgent = amp.createAgent({
+		extends: 'medium',
+		instructions: 'You are a harmless Orc project-connection verifier. Make no file or GitHub changes. Call workflow_verify_project_connection exactly once with the supplied one-time capability, then stop.',
+		tools: { add: ['workflow_verify_project_connection'] },
+		display: { label: 'Orc connection check', color: '#22c55e' },
+	})
 	amp.registerAgentMode({
 		key: 'orc-proof-agent',
 		label: 'Orc proof',
@@ -146,9 +158,9 @@ export default function (amp: PluginAPI) {
 	void amp.createWebhook({
 		// Version the durable registration whenever launch behavior changes because
 		// an existing capability can retain its previously loaded handler.
-		key: 'orc-stage-launch-v6',
+		key: 'orc-stage-launch-v7',
 		headers: ['idempotency-key', 'x-orc-event-id', 'x-orc-timestamp', 'x-orc-signature'],
-		handler: async (event, ctx) => handleLaunch(event, ctx, config, proofAgent, developmentAgent, qaAgent, amp),
+		handler: async (event, ctx) => handleLaunch(event, ctx, config, proofAgent, developmentAgent, qaAgent, verificationAgent, amp),
 	}).then((registration) => {
 		mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 })
 		writeFileSync(webhookPath, registration.url, { mode: 0o600 })
@@ -166,6 +178,7 @@ async function handleLaunch(
 	proofAgent: ReturnType<PluginAPI['createAgent']>,
 	developmentAgent: ReturnType<PluginAPI['createAgent']>,
 	qaAgent: ReturnType<PluginAPI['createAgent']>,
+	verificationAgent: ReturnType<PluginAPI['createAgent']>,
 	amp: PluginAPI,
 ) {
 	if (!config) throw new Error('Orc plugin runtime configuration is missing.')
@@ -177,6 +190,11 @@ async function handleLaunch(
 	const signature = ctxHeader(event, 'x-orc-signature')
 	verifyLaunchSignature(body, eventId, timestamp, signature, config.launchSigningSecret)
 	const envelope = JSON.parse(body) as Record<string, unknown>
+	if (envelope.command === 'verify_connection') {
+		await handleConnectionVerification(envelope, config, verificationAgent, ctx.thread.id, ctx.signal)
+		return
+	}
+	assertControllerBinding(envelope, config)
 	if (envelope.command === 'cancel') {
 		if (
 			envelope.schema_version !== 1
@@ -448,6 +466,7 @@ async function capabilityPost(
 		action,
 		occurred_at: new Date().toISOString(),
 		thread_id: threadId,
+		amp_project_id: actualAmpProjectId(),
 		...extra,
 	}
 	const response = await fetch(context.stage_capability_url, {
@@ -479,9 +498,11 @@ async function callback(
 		idempotency_key: context.idempotency_key,
 		launch_event_id: context.event_id,
 		stage_run_id: context.stage_run_id,
+		connection_id: context.connection_id,
+		amp_project_id: actualAmpProjectId(),
 		...extra,
 	}
-	const url = `${config.callbackUrl.replace(/\/$/, '')}/callback`
+	const url = `${context.callback_url.replace(/\/$/, '')}/callback`
 	let lastError: unknown
 
 	for (const delay of [0, 400, 1200]) {
@@ -550,6 +571,11 @@ function parseLaunch(body: string): LaunchPayload {
 	const payload = JSON.parse(body) as Partial<LaunchPayload>
 	if (
 		payload.schema_version !== 1
+		|| !Number.isInteger(payload.project_id)
+		|| typeof payload.connection_id !== 'string'
+		|| typeof payload.amp_project_id !== 'string'
+		|| typeof payload.controller_key !== 'string'
+		|| typeof payload.callback_url !== 'string'
 		|| typeof payload.event_id !== 'string'
 		|| typeof payload.idempotency_key !== 'string'
 		|| !Number.isInteger(payload.stage_run_id)
@@ -579,9 +605,98 @@ function readRuntimeConfig(path: string): RuntimeConfig | null {
 		file = JSON.parse(readFileSync(path, 'utf8')) as Partial<RuntimeConfig>
 	} catch {}
 
-	if (!file.callbackUrl || !file.launchSigningSecret || !file.callbackSigningSecret) return null
+	if (!file.connectionId || !file.ampProjectId || !file.launchSigningSecret || !file.callbackSigningSecret) return null
 
 	return file as RuntimeConfig
+}
+
+async function handleConnectionVerification(
+	envelope: Record<string, unknown>,
+	config: RuntimeConfig,
+	verificationAgent: ReturnType<PluginAPI['createAgent']>,
+	controllerThreadId: string,
+	signal?: AbortSignal,
+) {
+	assertControllerBinding(envelope, config)
+	if (
+		envelope.schema_version !== 1
+		|| typeof envelope.event_id !== 'string'
+		|| envelope.idempotency_key !== envelope.event_id
+		|| typeof envelope.github_repository !== 'string'
+		|| typeof envelope.verification_url !== 'string'
+		|| typeof envelope.verification_token !== 'string'
+	) throw new Error('Malformed Orc connection verification request.')
+
+	const base = {
+		schema_version: 1,
+		event_id: randomUUID(),
+		amp_project_id: actualAmpProjectId(),
+		github_repository: envelope.github_repository,
+	}
+	const claim = await bearerPost(String(envelope.verification_url), String(envelope.verification_token), {
+		...base,
+		action: 'claim',
+	}, signal)
+	if (!claim.accepted || claim.launch !== true) return
+
+	const thread = await verificationAgent.createThread({
+		parentThreadID: controllerThreadId as `T-${string}`,
+		executor: 'orb',
+		visibility: 'private',
+		multiplayerTTLSeconds: null,
+		features: [],
+		show: false,
+	})
+	const started = await bearerPost(String(envelope.verification_url), String(envelope.verification_token), {
+		...base,
+		event_id: randomUUID(),
+		action: 'started',
+		thread_id: thread.id,
+	}, signal)
+	if (!started.accepted) {
+		await thread.cancel().catch(() => undefined)
+		return
+	}
+	await sleep(5_000, signal)
+	await thread.appendUserMessage({
+		type: 'user-message',
+		content: [
+			'Verify this Orc project connection without modifying anything.',
+			`Canonical repository: ${envelope.github_repository}`,
+			`Verification URL: ${envelope.verification_url}`,
+			`Verification token: ${envelope.verification_token}`,
+			'Call workflow_verify_project_connection once. Never print the token.',
+		].join('\n'),
+	})
+}
+
+async function bearerPost(url: string, token: string, payload: Record<string, unknown>, signal?: AbortSignal) {
+	const timeout = AbortSignal.timeout(8_000)
+	const response = await fetch(url, {
+		method: 'POST',
+		headers: { accept: 'application/json', 'content-type': 'application/json', authorization: `Bearer ${token}` },
+		body: JSON.stringify(payload),
+		signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+	})
+	if (!response.ok && response.status >= 500) throw new Error('Orc verification callback failed.')
+
+	return await response.json().catch(() => ({})) as Record<string, any>
+}
+
+function assertControllerBinding(payload: Record<string, unknown>, config: RuntimeConfig) {
+	if (
+		payload.connection_id !== config.connectionId
+		|| (payload.expected_amp_project_id !== undefined && payload.expected_amp_project_id !== config.ampProjectId)
+		|| (payload.amp_project_id !== undefined && payload.amp_project_id !== config.ampProjectId)
+		|| actualAmpProjectId() !== config.ampProjectId
+	) throw new Error('This request is bound to a different Amp project controller.')
+}
+
+function actualAmpProjectId() {
+	const projectId = process.env.AMP_PROJECT_ID
+	if (!projectId) throw new Error('Amp did not provide the actual project identity to this controller.')
+
+	return projectId
 }
 
 function ctxHeader(event: WebhookEvent, name: string): string {

@@ -15,7 +15,6 @@ class StartWorkflowRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         $this->merge([
-            'github_repository' => trim((string) $this->input('github_repository'), " /\t\n\r\0\x0B"),
             'github_issue_url' => rtrim(trim((string) $this->input('github_issue_url')), '/'),
         ]);
     }
@@ -24,7 +23,6 @@ class StartWorkflowRequest extends FormRequest
     {
         return [
             'workflow_definition_id' => ['required', 'integer', 'exists:workflow_definitions,id'],
-            'github_repository' => ['required', 'string', 'max:255', 'regex:/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/'],
             'github_issue_number' => ['required', 'integer', 'min:1'],
             'github_issue_url' => ['required', 'url:https', 'max:2048'],
         ];
@@ -38,7 +36,7 @@ class StartWorkflowRequest extends FormRequest
             $path = strtolower(rtrim((string) parse_url($url, PHP_URL_PATH), '/'));
             $expected = strtolower(sprintf(
                 '/%s/issues/%s',
-                $this->input('github_repository'),
+                $this->route('project')?->github_repository,
                 $this->input('github_issue_number'),
             ));
 

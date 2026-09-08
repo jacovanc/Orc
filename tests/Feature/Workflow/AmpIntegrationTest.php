@@ -16,6 +16,7 @@ use App\Models\AmpLaunch;
 use App\Models\User;
 use App\Models\WorkflowDefinition;
 use App\Models\WorkflowRun;
+use App\Services\AmpConnectionUrlGuard;
 use App\Services\AmpLaunchPayload;
 use App\Services\AmpSignature;
 use App\Services\WorkflowEngine;
@@ -26,6 +27,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Tests\TestCase;
 
 class AmpIntegrationTest extends TestCase
@@ -43,14 +45,13 @@ class AmpIntegrationTest extends TestCase
         $this->seed(DevelopmentWorkflowSeeder::class);
         $this->engine = app(WorkflowEngine::class);
         $this->user = User::factory()->create();
+        $this->user->update(['can_trigger_amp' => true]);
         config([
             'services.amp.enabled' => true,
             'services.amp.launch_webhook_url' => 'https://amp.test/webhook',
             'services.amp.launch_signing_secret' => 'launch-test-secret',
             'services.amp.callback_signing_secret' => 'callback-test-secret',
             'services.amp.signature_tolerance_seconds' => 300,
-            'services.amp.allowed_repositories' => ['acme/widgets'],
-            'services.amp.allowed_user_emails' => [$this->user->email],
         ]);
         Queue::fake();
     }
@@ -76,21 +77,9 @@ class AmpIntegrationTest extends TestCase
         $this->assertSame(1, $run->events()->where('type', 'stage.launch_queued')->count());
     }
 
-    public function test_amp_launches_require_an_allowed_repository_and_user(): void
+    public function test_amp_launches_require_immutable_account_permission_and_owned_verified_project(): void
     {
-        config(['services.amp.allowed_repositories' => []]);
-
-        try {
-            $this->startRun();
-            $this->fail('An empty repository allowlist must fail closed.');
-        } catch (WorkflowConflict $exception) {
-            $this->assertStringContainsString('repository is not authorized', $exception->getMessage());
-        }
-
-        config([
-            'services.amp.allowed_repositories' => ['acme/widgets'],
-            'services.amp.allowed_user_emails' => [],
-        ]);
+        $this->user->update(['can_trigger_amp' => false]);
 
         $this->expectException(WorkflowConflict::class);
         $this->expectExceptionMessage('account is not authorized');
@@ -124,12 +113,12 @@ class AmpIntegrationTest extends TestCase
 
         $job = new DeliverAmpLaunch($launch->id);
         try {
-            $job->handle(app(AmpLaunchPayload::class), app(AmpSignature::class), $this->engine);
+            $job->handle(app(AmpLaunchPayload::class), app(AmpSignature::class), $this->engine, app(AmpConnectionUrlGuard::class));
             $this->fail('The first network attempt should be retried by the queue.');
-        } catch (ConnectionException) {
+        } catch (RuntimeException) {
             // Expected transient delivery failure.
         }
-        $job->handle(app(AmpLaunchPayload::class), app(AmpSignature::class), $this->engine);
+        $job->handle(app(AmpLaunchPayload::class), app(AmpSignature::class), $this->engine, app(AmpConnectionUrlGuard::class));
 
         $this->assertCount(2, $requests);
         $this->assertSame($requests[0]->body(), $requests[1]->body());
@@ -160,11 +149,11 @@ class AmpIntegrationTest extends TestCase
 
         $job = new DeliverAmpLaunch($launch->id);
         try {
-            $job->handle(app(AmpLaunchPayload::class), app(AmpSignature::class), $this->engine);
-        } catch (ConnectionException) {
+            $job->handle(app(AmpLaunchPayload::class), app(AmpSignature::class), $this->engine, app(AmpConnectionUrlGuard::class));
+        } catch (RuntimeException) {
             // The durable queue retries this exact launch.
         }
-        $job->handle(app(AmpLaunchPayload::class), app(AmpSignature::class), $this->engine);
+        $job->handle(app(AmpLaunchPayload::class), app(AmpSignature::class), $this->engine, app(AmpConnectionUrlGuard::class));
 
         $this->assertSame(2, $requests);
         $this->assertSame(AmpLaunchStatus::Claimed, $launch->fresh()->launch_status);
@@ -233,6 +222,7 @@ class AmpIntegrationTest extends TestCase
             app(AmpLaunchPayload::class),
             app(AmpSignature::class),
             $this->engine,
+            app(AmpConnectionUrlGuard::class),
         );
         Http::assertNothingSent();
         $this->assertSame(AmpDeliveryStatus::Delivered, $launch->fresh()->delivery_status);
@@ -424,7 +414,7 @@ class AmpIntegrationTest extends TestCase
         Queue::assertPushed(ReconcileAmpLaunch::class, 1);
 
         Http::fake(['*' => Http::response('', 202)]);
-        (new DeliverAmpCancellation($launch->id))->handle(app(AmpSignature::class));
+        (new DeliverAmpCancellation($launch->id))->handle(app(AmpSignature::class), app(AmpConnectionUrlGuard::class));
 
         Http::assertSent(function ($request) use ($launch, $thread) {
             $payload = $request->data();
@@ -471,6 +461,7 @@ class AmpIntegrationTest extends TestCase
             app(AmpLaunchPayload::class),
             app(AmpSignature::class),
             $this->engine,
+            app(AmpConnectionUrlGuard::class),
         );
 
         $this->assertSame(AmpDeliveryStatus::Failed, $failedLaunch->fresh()->delivery_status);
@@ -490,6 +481,7 @@ class AmpIntegrationTest extends TestCase
             app(AmpLaunchPayload::class),
             app(AmpSignature::class),
             $this->engine,
+            app(AmpConnectionUrlGuard::class),
         );
         Http::assertNothingSent();
     }
@@ -499,7 +491,7 @@ class AmpIntegrationTest extends TestCase
         return $this->engine->start(
             $this->user,
             WorkflowDefinition::query()->where('version', 1)->sole(),
-            'acme/widgets',
+            $this->workflowProject($this->user, 'acme/widgets'),
             42,
             'https://github.com/acme/widgets/issues/42',
         );
@@ -537,6 +529,8 @@ class AmpIntegrationTest extends TestCase
             'idempotency_key' => $launch->idempotency_key,
             'launch_event_id' => $launch->event_id,
             'stage_run_id' => $launch->stage_run_id,
+            'connection_id' => $launch->ampProjectConnection->public_id,
+            'amp_project_id' => $launch->ampProjectConnection->amp_project_id,
             ...$extra,
         ];
     }
@@ -546,18 +540,19 @@ class AmpIntegrationTest extends TestCase
         ?int $timestamp = null,
         ?string $signature = null,
     ) {
+        $launch = AmpLaunch::query()->where('idempotency_key', $payload['idempotency_key'])->firstOrFail();
         $body = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         $timestamp ??= now()->timestamp;
         $signature ??= app(AmpSignature::class)->sign(
             $body,
             $payload['event_id'],
             $timestamp,
-            config('services.amp.callback_signing_secret'),
+            $launch->ampProjectConnection->callback_signing_secret,
         );
 
         return $this->call(
             'POST',
-            '/api/integrations/amp/callback',
+            '/api/integrations/amp/connections/'.$launch->ampProjectConnection->public_id.'/callback',
             [],
             [],
             [],

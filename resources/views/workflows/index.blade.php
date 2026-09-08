@@ -5,7 +5,7 @@
         <div>
             <div class="eyebrow"><span></span> Delivery control plane</div>
             <h1 class="mt-5 text-4xl font-semibold tracking-[-0.045em] text-white sm:text-5xl">Workflows</h1>
-            <p class="mt-3 max-w-xl text-base leading-7 text-zinc-500">Track delivery without moving requirements, code, or discussion out of GitHub.</p>
+            <p class="mt-3 max-w-xl text-base leading-7 text-zinc-500">All-project overview. Track delivery without moving requirements, code, or discussion out of GitHub.</p>
         </div>
         <a href="{{ route('workflows.create') }}" class="button-primary self-start sm:self-auto">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>

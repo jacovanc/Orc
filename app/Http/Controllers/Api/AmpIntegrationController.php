@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Workflow\Exceptions\WorkflowConflict;
 use App\Http\Controllers\Controller;
+use App\Models\AmpProjectConnection;
+use App\Services\AmpProjectConnectionService;
 use App\Services\WorkflowEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -11,9 +13,12 @@ use Illuminate\Validation\Rule;
 
 class AmpIntegrationController extends Controller
 {
-    public function __construct(private readonly WorkflowEngine $engine) {}
+    public function __construct(
+        private readonly WorkflowEngine $engine,
+        private readonly AmpProjectConnectionService $connections,
+    ) {}
 
-    public function callback(Request $request): JsonResponse
+    public function callback(Request $request, AmpProjectConnection $ampProjectConnection): JsonResponse
     {
         $payload = $request->validate([
             'schema_version' => ['required', 'integer', 'in:1'],
@@ -42,6 +47,8 @@ class AmpIntegrationController extends Controller
             'github_pull_request_url' => ['nullable', 'url:https', 'max:2048'],
             'report_nonce' => ['nullable', 'string', 'size:64'],
             'reason' => ['nullable', 'string', 'max:500'],
+            'amp_project_id' => ['required', 'string', 'max:100'],
+            'connection_id' => ['required', 'uuid'],
         ]);
 
         if ($payload['event_id'] !== $request->attributes->get('amp_event_id')) {
@@ -52,6 +59,7 @@ class AmpIntegrationController extends Controller
             $result = $this->engine->handleAmpCallback(
                 $payload,
                 hash('sha256', $request->getContent()),
+                $ampProjectConnection,
             );
         } catch (WorkflowConflict $exception) {
             return response()->json(['message' => $exception->getMessage()], 409);
@@ -60,7 +68,7 @@ class AmpIntegrationController extends Controller
         return response()->json($result, $result['accepted'] ? 200 : 202);
     }
 
-    public function context(Request $request): JsonResponse
+    public function context(Request $request, AmpProjectConnection $ampProjectConnection): JsonResponse
     {
         $payload = $request->validate([
             'schema_version' => ['required', 'integer', 'in:1'],
@@ -68,6 +76,8 @@ class AmpIntegrationController extends Controller
             'type' => ['required', 'in:context.lookup'],
             'occurred_at' => ['required', 'date'],
             'thread_id' => ['required', 'string', 'regex:/^T-[A-Za-z0-9-]+$/'],
+            'amp_project_id' => ['required', 'string', 'max:100'],
+            'connection_id' => ['required', 'uuid'],
         ]);
 
         if ($payload['event_id'] !== $request->attributes->get('amp_event_id')) {
@@ -75,7 +85,12 @@ class AmpIntegrationController extends Controller
         }
 
         try {
-            return response()->json($this->engine->ampContext($payload['thread_id']));
+            return response()->json($this->engine->ampContext(
+                $payload['thread_id'],
+                $ampProjectConnection,
+                $payload['amp_project_id'],
+                $payload['connection_id'],
+            ));
         } catch (WorkflowConflict $exception) {
             return response()->json(['message' => $exception->getMessage()], 404);
         }
@@ -102,11 +117,16 @@ class AmpIntegrationController extends Controller
             'github_pull_request_number' => ['nullable', 'integer', 'min:1'],
             'github_pull_request_url' => ['nullable', 'url:https', 'max:2048'],
             'reason' => ['nullable', 'string', 'max:500'],
+            'amp_project_id' => ['required', 'string', 'max:100'],
         ]);
 
         try {
             if ($payload['action'] === 'context') {
-                return response()->json($this->engine->stageCapabilityContext($token, $payload['thread_id']));
+                return response()->json($this->engine->stageCapabilityContext(
+                    $token,
+                    $payload['thread_id'],
+                    $payload['amp_project_id'],
+                ));
             }
 
             $result = $this->engine->handleStageCapability(
@@ -114,6 +134,31 @@ class AmpIntegrationController extends Controller
                 $payload,
                 hash('sha256', $token."\0".$request->getContent()),
             );
+        } catch (WorkflowConflict $exception) {
+            return response()->json(['message' => $exception->getMessage()], 409);
+        }
+
+        return response()->json($result, $result['accepted'] ? 200 : 202);
+    }
+
+    public function connectionVerification(Request $request): JsonResponse
+    {
+        $token = $request->bearerToken();
+        if (! is_string($token) || $token === '') {
+            return response()->json(['message' => 'A connection verification capability is required.'], 401);
+        }
+        $payload = $request->validate([
+            'schema_version' => ['required', 'integer', 'in:1'],
+            'event_id' => ['required', 'uuid'],
+            'action' => ['required', Rule::in(['claim', 'started', 'complete'])],
+            'thread_id' => ['nullable', 'string', 'regex:/^T-[A-Za-z0-9-]+$/'],
+            'amp_project_id' => ['required', 'string', 'max:100'],
+            'github_repository' => ['required', 'string', 'regex:/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/'],
+            'native_github_access' => ['nullable', 'required_if:action,complete', 'boolean'],
+        ]);
+
+        try {
+            $result = $this->connections->handleVerification($token, $payload);
         } catch (WorkflowConflict $exception) {
             return response()->json(['message' => $exception->getMessage()], 409);
         }

@@ -107,7 +107,7 @@ class ProfileTest extends TestCase
         app(WorkflowEngine::class)->start(
             $user,
             WorkflowDefinition::query()->where('version', 1)->sole(),
-            'acme/widgets',
+            $this->workflowProject($user, 'acme/widgets'),
             18,
             'https://github.com/acme/widgets/issues/18',
         );

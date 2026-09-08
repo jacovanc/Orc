@@ -23,6 +23,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'can_trigger_amp',
     ];
 
     /**
@@ -45,11 +46,17 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'can_trigger_amp' => 'boolean',
         ];
     }
 
     public function workflowRuns(): HasMany
     {
         return $this->hasMany(WorkflowRun::class);
+    }
+
+    public function projects(): HasMany
+    {
+        return $this->hasMany(Project::class);
     }
 }

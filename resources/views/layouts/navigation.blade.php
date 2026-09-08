@@ -6,6 +6,7 @@
                 <span class="text-xl font-bold tracking-[-0.04em] text-white">Orc</span>
             </a>
             <div class="hidden items-center gap-1 md:flex">
+                <a href="{{ route('projects.index') }}" class="nav-item {{ request()->routeIs('projects.*') ? 'nav-item-active' : '' }}">Projects</a>
                 <a href="{{ route('workflows.index') }}" class="nav-item {{ request()->routeIs('workflows.index', 'workflows.show') ? 'nav-item-active' : '' }}">Workflows</a>
                 <a href="{{ route('workflows.create') }}" class="nav-item {{ request()->routeIs('workflows.create') ? 'nav-item-active' : '' }}">Start run</a>
             </div>
@@ -30,6 +31,7 @@
         </button>
     </div>
     <div x-show="open" x-cloak class="border-t border-white/[0.07] px-5 py-4 md:hidden">
+        <a href="{{ route('projects.index') }}" class="block rounded-lg px-3 py-2 text-sm text-zinc-200">Projects</a>
         <a href="{{ route('workflows.index') }}" class="block rounded-lg px-3 py-2 text-sm text-zinc-200">Workflows</a>
         <a href="{{ route('workflows.create') }}" class="block rounded-lg px-3 py-2 text-sm text-zinc-200">Start run</a>
         <form method="POST" action="{{ route('logout') }}">@csrf<button class="mt-2 block px-3 py-2 text-sm text-zinc-500">Sign out</button></form>
