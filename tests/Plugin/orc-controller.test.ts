@@ -141,6 +141,7 @@ describe('Orc controller agent configuration', () => {
 		])
 		expect(agentConfigs[1].tools.add).toContain('workflow_record_publication')
 		expect(agentConfigs[1].model).toBe('openai/gpt-5.6-sol')
+		expect(agentConfigs[1].instructions).toContain('origin may be an Amp-hosted project remote')
 		rmSync(root, { recursive: true, force: true })
 	})
 

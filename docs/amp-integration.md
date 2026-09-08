@@ -97,13 +97,14 @@ Proof modes publish one clearly labelled `workflow_post_test_comment` report and
 Real Development:
 
 1. reads GitHub and the checkout afresh;
-2. implements only the outstanding bound issue work using normal tools and native authentication;
-3. tests the change;
-4. pushes deterministic branch `orc/stage-<stage-run-id>-attempt-<attempt>`;
-5. creates or updates one open, same-repository, marker-bound pull request and never merges it;
-6. calls `workflow_record_publication`, which verifies the PR through native `gh` before Laravel binds its identifiers;
-7. publishes a substantive success/blocked report with `workflow_post_development_report`;
-8. calls `workflow_complete(success|blocked)`.
+2. verifies the checkout and explicitly bases its deterministic branch on the bound GitHub repository's current default branch rather than assuming the Orb's initial `origin` is the target;
+3. implements only the outstanding bound issue work using normal tools and native authentication;
+4. tests the change;
+5. pushes deterministic branch `orc/stage-<stage-run-id>-attempt-<attempt>` only to an explicitly verified target GitHub remote;
+6. creates or updates one open, same-repository, marker-bound pull request and never merges it;
+7. calls `workflow_record_publication`, which verifies the PR through native `gh` before Laravel binds its identifiers;
+8. publishes a substantive success/blocked report with `workflow_post_development_report`;
+9. calls `workflow_complete(success|blocked)`.
 
 Before a GitHub comment is posted, the worker acquires one persistent report-publication claim through the per-launch capability. Concurrent callers reconcile the authenticated user's paginated nonce marker rather than post twice. If a claimed publication has no visible comment, Orc reports ambiguity instead of risking a duplicate.
 
@@ -135,7 +136,7 @@ Cancellation first closes Laravel's active slot and launch under locks, so late 
 6. Use issue `jacovanc/Orc#1` only for harmless integration proof. Do not use it for coding.
 7. For real Development proof, require a separately designated small issue; confirm the new thread ID, branch, open PR, report, checks, and transition to proof-only QA.
 
-## Existing proof evidence and current live gap
+## Live evidence
 
 Production `RUN-0015` proved the older v1 Development→QA integration path on 2026-09-07 with two distinct fresh sandbox threads:
 
@@ -144,4 +145,14 @@ Production `RUN-0015` proved the older v1 Development→QA integration path on 2
 - QA thread: <https://ampcode.com/threads/T-01a07db9-7853-759c-8e74-ebfdb89e0911>
 - QA proof report: <https://github.com/jacovanc/Orc/issues/1#issuecomment-5575697936>
 
-Those are orchestration proofs only. They did not validate code and must not be cited as Milestone 6 live coding proof. Milestone 6 is implemented and locally/mock verified, but no authorized real coding issue currently exists. Private-repository operation is not claimed.
+Those are orchestration proofs only. They did not validate code and must not be cited as Milestone 6 live coding proof.
+
+Production `RUN-0017` live-proved Milestone 6 against user-authorized documentation issue <https://github.com/jacovanc/Orc/issues/2>:
+
+- Development thread: <https://ampcode.com/threads/T-01a08098-ff9f-7367-af7a-99f1a0091ce4>
+- Open, unmerged pull request: <https://github.com/jacovanc/Orc/pull/3>
+- Substantive Development report: <https://github.com/jacovanc/Orc/issues/2#issuecomment-5583912890>
+- Proof-only QA thread: <https://ampcode.com/threads/T-01a0809e-cbc1-767a-8ca5-2396c88216c5>
+- Proof-only QA report: <https://github.com/jacovanc/Orc/issues/2#issuecomment-5583925014>
+
+The two completed agent attempts used distinct sandbox executors and each required exactly one delivered launch. QA completed only `proof_complete`; Laravel stopped at Human Review and neither Orc nor either agent merged or approved the pull request. Public-repository operation is proven; private-repository access is not claimed.

@@ -1,6 +1,6 @@
 # Milestone 6 design: real Development, proof-only QA
 
-Status: implemented and awaiting a user-designated live coding issue. The independent review's authorization, launch recovery, acknowledgement, truthful QA, immutable payload, report idempotency, controller-role, cancellation, registration, and lock-file findings were addressed, with its restrictive-tool and copied-credential recommendations superseded by the user's later native-auth/default-tools requirements.
+Status: implemented and live-proven with the user-authorized documentation issue `jacovanc/Orc#2`. The independent review's authorization, launch recovery, acknowledgement, truthful QA, immutable payload, report idempotency, controller-role, cancellation, registration, and lock-file findings were addressed, with its restrictive-tool and copied-credential recommendations superseded by the user's later native-auth/default-tools requirements.
 
 ## Scope and non-goals
 
@@ -58,12 +58,13 @@ The launch payload carries the mode, allowed outcomes, issue identifiers, attemp
 1. Laravel creates one durable launch for the active Development `StageRun` and uses the existing claim-before-create protocol.
 2. The controller creates exactly one fresh private thread with `executor: "orb"` and binds it before prompting.
 3. `workflow_read_issue` retrieves the issue body, current discussion, existing attempt report, and linked pull-request references from GitHub at call time. Returned GitHub content is explicitly untrusted data, not instructions outside the authorized issue task.
-4. The agent retains its normal Amp shell, edit, web, MCP, and related tools for repository inspection, implementation, and tests.
-5. Native Orb `git` and `gh` authentication performs repository and GitHub operations. Orc neither supplies nor repairs access; missing access is a prerequisite blocker.
-6. The agent uses the deterministic branch `orc/stage-<stage-run-id>-attempt-<attempt>`, pushes it, and creates or updates one marker-bound PR. It never merges, force-pushes, changes the issue state, or targets another repository.
-7. `workflow_post_development_report` publishes a substantive issue comment linking the PR and recording check status. A nonce marker makes it idempotent.
-8. `workflow_complete(success)` requires the bound PR and report. `workflow_complete(blocked)` requires a substantive blocked report and no fabricated success evidence.
-9. Laravel transactionally validates the current attempt, exact thread, bounded outcome, same-repository PR/report URLs, and mode-specific evidence before transitioning.
+4. The agent verifies that its checkout is the bound GitHub repository, fetches that repository's current default branch, and bases the deterministic attempt branch on it before editing. A fresh Orb may initially have an Amp-hosted project `origin`; that remote must not be mistaken for the target GitHub remote.
+5. The agent retains its normal Amp shell, edit, web, MCP, and related tools for repository inspection, implementation, and tests.
+6. Native Orb `git` and `gh` authentication performs repository and GitHub operations. Orc neither supplies nor repairs access; missing access is a prerequisite blocker.
+7. The agent uses the deterministic branch `orc/stage-<stage-run-id>-attempt-<attempt>`, pushes it only to an explicitly verified target GitHub remote, and creates or updates one marker-bound PR. It never merges, force-pushes, changes the issue state, or targets another repository.
+8. `workflow_post_development_report` publishes a substantive issue comment linking the PR and recording check status. A nonce marker makes it idempotent.
+9. `workflow_complete(success)` requires the bound PR and report. `workflow_complete(blocked)` requires a substantive blocked report and no fabricated success evidence.
+10. Laravel transactionally validates the current attempt, exact thread, bounded outcome, same-repository PR/report URLs, and mode-specific evidence before transitioning.
 
 An agent may update an existing PR only when it is explicitly linked to the same issue and bound to the current deterministic branch/attempt marker. It never merges a PR.
 
@@ -129,6 +130,8 @@ Worker/controller coverage with mocked GitHub and process boundaries:
 
 Live verification requires a clearly authorized, small real issue. The integration-test issue `jacovanc/Orc#1` is explicitly reserved for proof-only comments and must not be repurposed.
 
-## Test-target assessment
+## Live acceptance
 
-As of 2026-09-07, `jacovanc/Orc#1` is the only open issue in the authorized public Orc repository, and its body explicitly prohibits product implementation. No suitable existing real Development issue is currently available. Implementation and deployment may proceed with mocked network/process tests after review findings are resolved, but live coding proof must wait for the user to designate a repository and issue. Private-repository capability must not be claimed from the public proof or exercised without an explicitly approved private target.
+On 2026-09-08, user-authorized documentation issue `jacovanc/Orc#2` exercised workflow `RUN-0017`. Development ran in fresh sandbox thread `T-01a08098-ff9f-7367-af7a-99f1a0091ce4`, pushed deterministic branch `orc/stage-19-attempt-1`, opened (and did not merge) PR #3, published a substantive report, and completed `success`. Distinct sandbox thread `T-01a0809e-cbc1-767a-8ca5-2396c88216c5` then published an explicitly proof-only QA report and completed only `proof_complete`. The run stopped at Human Review.
+
+The Development Orb initially inherited the Amp-hosted project remote and an obsolete empty base. It detected the mismatch, fetched GitHub `main`, rebased its documentation commit, pushed only the corrected branch to GitHub, and then created the PR. The controller instructions now require target checkout/default-branch verification before editing so later attempts avoid that recovery path. This public-repository acceptance does not prove private-repository access.

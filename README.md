@@ -97,7 +97,7 @@ Deployment status and exact verification evidence are recorded in [IMPLEMENTATIO
 - A crash in the narrow interval after Amp creates a thread but before Laravel receives its thread ID leaves the launch claimed for manual reconciliation. Orc deliberately does not risk a duplicate Orb.
 - Change feedback must be published manually on GitHub; Orc stores its URL only.
 - There is no workflow editor. Definitions are seeded and versioned in code/database.
-- Real Development is implemented but has no authorized live coding proof yet because the only current issue is reserved for integration testing. Independent real QA remains Milestone 7 work.
+- Real Development has a controlled public-repository acceptance on documentation issue `jacovanc/Orc#2`; its pull request remains open for Human Review. This does not prove private-repository operation. Independent real QA remains Milestone 7 work.
 
 ## Design rules for later phases
 
