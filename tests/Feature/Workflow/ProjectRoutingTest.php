@@ -213,6 +213,39 @@ class ProjectRoutingTest extends TestCase
         $this->assertTrue($connection->fresh()->isReady());
     }
 
+    public function test_claimed_verification_failure_is_recorded_and_idempotent_without_retrying_an_orb(): void
+    {
+        $project = Project::factory()->for($this->owner)->create([
+            'github_repository' => 'acme/widgets',
+            'amp_project_id' => 'amp-project-one',
+        ]);
+        $service = app(AmpProjectConnectionService::class);
+        $connection = $service->configure($project, $this->owner, [
+            'amp_project_id' => 'amp-project-one',
+            'launch_webhook_url' => 'https://hooks.ampcode.com/controller',
+            'launch_signing_secret' => str_repeat('l', 40),
+            'callback_signing_secret' => str_repeat('c', 40),
+        ]);
+        $connection = $service->beginVerification($project->fresh(), $connection, $this->owner);
+        $token = $connection->verification_secret;
+        $base = [
+            'amp_project_id' => 'amp-project-one',
+            'github_repository' => 'acme/widgets',
+            'failure_code' => 'controller_thread_failed',
+        ];
+
+        $service->handleVerification($token, [...$base, 'action' => 'claim']);
+        $failed = $service->handleVerification($token, [...$base, 'action' => 'failed']);
+        $duplicate = $service->handleVerification($token, [...$base, 'action' => 'failed']);
+
+        $this->assertSame('failed', $failed['disposition']);
+        $this->assertSame('already_failed', $duplicate['disposition']);
+        $this->assertSame('failed', $connection->fresh()->status);
+        $this->assertSame('controller_thread_failed', $connection->fresh()->last_error_code);
+        $this->assertNull($connection->fresh()->verification_thread_id);
+        Queue::assertPushed(VerifyAmpProjectConnection::class, 1);
+    }
+
     public function test_signed_callback_for_one_connection_is_rejected_by_another(): void
     {
         $first = Project::factory()->for($this->owner)->configured()->create(['github_repository' => 'acme/first']);

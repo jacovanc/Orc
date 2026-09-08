@@ -26,7 +26,7 @@ abstract class TestCase extends BaseTestCase
                 'public_id' => (string) Str::uuid(),
                 'version' => 1,
                 'amp_project_id' => $project->amp_project_id,
-                'controller_key' => 'orc-stage-launch-v7',
+                'controller_key' => 'orc-stage-launch-v8',
                 'launch_webhook_url' => $url,
                 'launch_signing_secret' => (string) (config('services.amp.launch_signing_secret') ?: str_repeat('l', 32)),
                 'callback_signing_secret' => (string) (config('services.amp.callback_signing_secret') ?: str_repeat('c', 32)),

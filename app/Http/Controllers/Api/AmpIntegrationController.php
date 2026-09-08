@@ -150,11 +150,12 @@ class AmpIntegrationController extends Controller
         $payload = $request->validate([
             'schema_version' => ['required', 'integer', 'in:1'],
             'event_id' => ['required', 'uuid'],
-            'action' => ['required', Rule::in(['claim', 'started', 'complete'])],
+            'action' => ['required', Rule::in(['claim', 'started', 'complete', 'failed'])],
             'thread_id' => ['nullable', 'string', 'regex:/^T-[A-Za-z0-9-]+$/'],
             'amp_project_id' => ['required', 'string', 'max:100'],
             'github_repository' => ['required', 'string', 'regex:/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/'],
             'native_github_access' => ['nullable', 'required_if:action,complete', 'boolean'],
+            'failure_code' => ['nullable', 'required_if:action,failed', Rule::in(['controller_thread_failed'])],
         ]);
 
         try {

@@ -32,7 +32,7 @@ class AmpProjectConnectionService
                 'public_id' => (string) Str::uuid(),
                 'version' => $version,
                 'amp_project_id' => $attributes['amp_project_id'],
-                'controller_key' => 'orc-stage-launch-v7',
+                'controller_key' => 'orc-stage-launch-v8',
                 'launch_webhook_url' => trim($attributes['launch_webhook_url']),
                 'launch_signing_secret' => $attributes['launch_signing_secret'],
                 'callback_signing_secret' => $attributes['callback_signing_secret'],
@@ -110,6 +110,9 @@ class AmpProjectConnectionService
             if ($connection->status === 'verified' && $payload['action'] === 'complete') {
                 return ['accepted' => true, 'disposition' => 'already_verified'];
             }
+            if ($connection->status === 'failed' && $payload['action'] === 'failed') {
+                return ['accepted' => true, 'disposition' => 'already_failed'];
+            }
             if ($connection->status !== 'verifying') {
                 throw new WorkflowConflict('This connection is not awaiting verification.');
             }
@@ -124,11 +127,16 @@ class AmpProjectConnectionService
 
             return match ($payload['action']) {
                 'claim' => $this->claimVerification($connection),
-                'started' => $this->startVerification($connection, $payload['thread_id']),
+                'started' => $this->startVerification($connection, $payload['thread_id'] ?? null),
                 'complete' => $this->completeVerification(
                     $connection,
-                    $payload['thread_id'],
+                    $payload['thread_id'] ?? null,
                     (bool) $payload['native_github_access'],
+                ),
+                'failed' => $this->failVerification(
+                    $connection,
+                    $payload['thread_id'] ?? null,
+                    $payload['failure_code'],
                 ),
             };
         }, 3);
@@ -193,6 +201,26 @@ class AmpProjectConnectionService
         ])->save();
 
         return ['accepted' => true, 'disposition' => 'verified'];
+    }
+
+    private function failVerification(AmpProjectConnection $connection, ?string $threadId, string $code): array
+    {
+        if (! $connection->verification_claimed_at) {
+            throw new WorkflowConflict('Connection verification must be claimed before it can fail.');
+        }
+        if ($connection->verification_thread_id && $threadId !== $connection->verification_thread_id) {
+            throw new WorkflowConflict('The verification failure came from an unbound child thread.');
+        }
+        if ($threadId && ! $connection->verification_thread_id) {
+            $connection->forceFill(['verification_thread_id' => $threadId])->save();
+        }
+        $this->markFailed(
+            $connection,
+            $code,
+            'The trusted controller could not start the fresh verification Orb safely.',
+        );
+
+        return ['accepted' => true, 'disposition' => 'failed'];
     }
 
     private function markFailed(AmpProjectConnection $connection, string $code, string $message): void

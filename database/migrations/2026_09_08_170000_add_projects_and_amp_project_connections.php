@@ -112,7 +112,7 @@ return new class extends Migration
                     'public_id' => (string) Str::uuid(),
                     'version' => 1,
                     'amp_project_id' => $legacyAmpProjectId,
-                    'controller_key' => 'orc-stage-launch-v7',
+                    'controller_key' => 'orc-stage-launch-v8',
                     'launch_webhook_url' => $configured ? Crypt::encryptString($legacyUrl) : null,
                     'launch_signing_secret' => $configured ? Crypt::encryptString($legacyLaunchSecret) : null,
                     'callback_signing_secret' => $configured ? Crypt::encryptString($legacyCallbackSecret) : null,

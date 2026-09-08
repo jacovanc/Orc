@@ -158,7 +158,7 @@ export default function (amp: PluginAPI) {
 	void amp.createWebhook({
 		// Version the durable registration whenever launch behavior changes because
 		// an existing capability can retain its previously loaded handler.
-		key: 'orc-stage-launch-v7',
+		key: 'orc-stage-launch-v8',
 		headers: ['idempotency-key', 'x-orc-event-id', 'x-orc-timestamp', 'x-orc-signature'],
 		handler: async (event, ctx) => handleLaunch(event, ctx, config, proofAgent, developmentAgent, qaAgent, verificationAgent, amp),
 	}).then((registration) => {
@@ -639,35 +639,48 @@ async function handleConnectionVerification(
 	}, signal)
 	if (!claim.accepted || claim.launch !== true) return
 
-	const thread = await verificationAgent.createThread({
-		parentThreadID: controllerThreadId as `T-${string}`,
-		executor: 'orb',
-		visibility: 'private',
-		multiplayerTTLSeconds: null,
-		features: [],
-		show: false,
-	})
-	const started = await bearerPost(String(envelope.verification_url), String(envelope.verification_token), {
-		...base,
-		event_id: randomUUID(),
-		action: 'started',
-		thread_id: thread.id,
-	}, signal)
-	if (!started.accepted) {
-		await thread.cancel().catch(() => undefined)
-		return
+	let thread: PluginThread | undefined
+	try {
+		thread = await verificationAgent.createThread({
+			parentThreadID: controllerThreadId as `T-${string}`,
+			executor: 'orb',
+			visibility: 'private',
+			multiplayerTTLSeconds: null,
+			features: [],
+			show: false,
+		})
+		const started = await bearerPost(String(envelope.verification_url), String(envelope.verification_token), {
+			...base,
+			event_id: randomUUID(),
+			action: 'started',
+			thread_id: thread.id,
+		}, signal)
+		if (!started.accepted) {
+			await thread.cancel().catch(() => undefined)
+			return
+		}
+		await sleep(5_000, signal)
+		await thread.appendUserMessage({
+			type: 'user-message',
+			content: [
+				'Verify this Orc project connection without modifying anything.',
+				`Canonical repository: ${envelope.github_repository}`,
+				`Verification URL: ${envelope.verification_url}`,
+				`Verification token: ${envelope.verification_token}`,
+				'Call workflow_verify_project_connection once. Never print the token.',
+			].join('\n'),
+		})
+	} catch (error) {
+		await thread?.cancel().catch(() => undefined)
+		await bearerPost(String(envelope.verification_url), String(envelope.verification_token), {
+			...base,
+			event_id: randomUUID(),
+			action: 'failed',
+			thread_id: thread?.id,
+			failure_code: 'controller_thread_failed',
+		}, signal).catch(() => undefined)
+		throw error
 	}
-	await sleep(5_000, signal)
-	await thread.appendUserMessage({
-		type: 'user-message',
-		content: [
-			'Verify this Orc project connection without modifying anything.',
-			`Canonical repository: ${envelope.github_repository}`,
-			`Verification URL: ${envelope.verification_url}`,
-			`Verification token: ${envelope.verification_token}`,
-			'Call workflow_verify_project_connection once. Never print the token.',
-		].join('\n'),
-	})
 }
 
 async function bearerPost(url: string, token: string, payload: Record<string, unknown>, signal?: AbortSignal) {

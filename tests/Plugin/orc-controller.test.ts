@@ -17,7 +17,7 @@ function launch(overrides: Record<string, unknown> = {}) {
 		project_id: 1,
 		connection_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		amp_project_id: 'amp-project-test',
-		controller_key: 'orc-stage-launch-v7',
+		controller_key: 'orc-stage-launch-v8',
 		callback_url: 'https://orc.test/api/integrations/amp/connections/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		event_id: '11111111-1111-4111-8111-111111111111',
 		idempotency_key: '22222222-2222-4222-8222-222222222222',
@@ -54,6 +54,7 @@ async function controllerHarness(testName: string, holdResponses = false) {
 	let handler: ((event: any, ctx: any) => Promise<void>) | undefined
 	let webhookKey: string | undefined
 	let createThreadCalls = 0
+	let createThreadError: Error | undefined
 	let cancelled = 0
 	let prompted = 0
 	let monitorWaiting = false
@@ -77,7 +78,11 @@ async function controllerHarness(testName: string, holdResponses = false) {
 		helpers: { filePathFromURI: () => root },
 		createAgent: (config: Record<string, any>) => ({
 			definition: config,
-			createThread: async () => { createThreadCalls++; return thread },
+			createThread: async () => {
+				createThreadCalls++
+				if (createThreadError) throw createThreadError
+				return thread
+			},
 		}),
 		registerAgentMode: () => undefined,
 		on: (event: string, callback: typeof agentEndHandler) => {
@@ -117,6 +122,7 @@ async function controllerHarness(testName: string, holdResponses = false) {
 			})
 		},
 		counts: () => ({ createThreadCalls, cancelled, prompted }),
+		failCreateThread: (error: Error) => { createThreadError = error },
 		monitorWasWaitingWhenPrompted: () => monitorWasWaitingWhenPrompted,
 		invokeAgentEnd: async (status: string) => {
 			if (!agentEndHandler) throw new Error('Controller did not register agent.end.')
@@ -196,7 +202,7 @@ describe('Orc controller agent configuration', () => {
 
 	test('marks a claimed launch without a durable thread ambiguous instead of creating a duplicate Orb', async () => {
 		const harness = await controllerHarness('claimed-without-thread')
-		expect(harness.webhookKey()).toBe('orc-stage-launch-v7')
+		expect(harness.webhookKey()).toBe('orc-stage-launch-v8')
 		const callbackTypes: string[] = []
 		globalThis.fetch = (async (_input, init) => {
 			const payload = JSON.parse(String(init?.body))
@@ -211,6 +217,35 @@ describe('Orc controller agent configuration', () => {
 
 		expect(callbackTypes).toEqual(['launch.claim', 'launch.ambiguous'])
 		expect(harness.counts()).toEqual({ createThreadCalls: 0, cancelled: 0, prompted: 0 })
+		rmSync(harness.root, { recursive: true, force: true })
+	})
+
+	test('reports a claimed connection verification when fresh thread creation fails', async () => {
+		const harness = await controllerHarness('verification-thread-failed')
+		harness.failCreateThread(new Error('provider unavailable'))
+		const actions: string[] = []
+		globalThis.fetch = (async (_input, init) => {
+			const payload = JSON.parse(String(init?.body))
+			actions.push(payload.action)
+			if (payload.action === 'claim') return Response.json({ accepted: true, launch: true })
+			if (payload.action === 'failed') return Response.json({ accepted: true, disposition: 'failed' })
+			throw new Error(`Unexpected verification callback: ${JSON.stringify(payload)}`)
+		}) as typeof fetch
+
+		await expect(harness.invoke({
+			schema_version: 1,
+			command: 'verify_connection',
+			event_id: '55555555-5555-4555-8555-555555555555',
+			idempotency_key: '55555555-5555-4555-8555-555555555555',
+			connection_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+			expected_amp_project_id: 'amp-project-test',
+			github_repository: 'acme/widgets',
+			verification_url: 'https://orc.test/api/integrations/amp/connection-verification',
+			verification_token: 'verification-capability-that-is-long-enough',
+		})).rejects.toThrow('provider unavailable')
+
+		expect(actions).toEqual(['claim', 'failed'])
+		expect(harness.counts()).toEqual({ createThreadCalls: 1, cancelled: 0, prompted: 0 })
 		rmSync(harness.root, { recursive: true, force: true })
 	})
 
