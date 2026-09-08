@@ -1,4 +1,4 @@
-# Orc Milestones 1–6: Domain and Architecture
+# Orc Milestones 1–7: Domain and Architecture
 
 This document defines the domain and the integration boundaries before each implementation phase is introduced.
 
@@ -9,7 +9,7 @@ Orc is an orchestration system, not a second source of truth for software work.
 - **GitHub owns** requirements, source code, implementation discussion, review discussion, and reports.
 - **Laravel stores** GitHub identifiers/URLs and the minimum workflow state required to orchestrate work.
 - Orc does not persist private prompts, issue bodies, generated reports, review feedback, or hidden development context.
-- Workflow v1 retains the Milestones 4–5 proof behavior. Workflow v2 uses a real Development agent followed by QA integration proof and an explicit human release gate. Simulation remains a local-development fallback only when integration is disabled.
+- Workflow v1 retains the Milestones 4–5 proof behavior. Workflow v2 uses a real Development agent followed by QA integration proof and an explicit human release gate. Workflow v3 adds independent substantive QA with remediation and blocked-operator loops. Simulation remains a local-development fallback only when integration is disabled.
 
 ## Domain model
 
@@ -53,6 +53,8 @@ Human Review (human) --request_changes> Development (agent)
 Human Review (human) --approve--------> Done (terminal)
 ```
 
+Workflow v2 and v3 are separately frozen definitions documented in [Milestone 6](milestone-6-design.md) and [Milestone 7](milestone-7-design.md). Version 3 routes Development success to substantive QA; QA pass to Human Review, fail to a fresh Development attempt, and blocked to an explicit human QA-blocked gate.
+
 ## State machine invariants
 
 1. `WorkflowEngine` is the only application service allowed to start, complete, transition, or cancel a run.
@@ -73,7 +75,7 @@ Human Review (human) --approve--------> Done (terminal)
 - Controllers return 404 unless a route-bound run belongs to the authenticated user; the engine repeats this ownership invariant at the mutation boundary. The seeded workflow definition is shared configuration.
 - Server-rendered Blade pages provide workflow list/start/detail views and require no JavaScript framework.
 
-## Milestones 4–5 integration boundary
+## Milestones 4–7 integration boundary
 
 ### Directional authentication
 
@@ -99,6 +101,8 @@ Callback event IDs and payload hashes are persisted. Replaying the same event an
 
 An explicit `workflow_complete` tool is the normal completion path. A guarded `agent.end` hook/controller monitor gives the agent one corrective turn if it forgets the tool, then reports failure rather than guessing an outcome. Each launch has an unguessable report nonce and an exclusive persistent publication claim. The worker accepts an existing marker only from the native authenticated GitHub identity, paginates reconciliation, and uses the narrow capability to attest the report. Laravel durably binds that comment ID/URL and report kind before completion; report text remains only on GitHub.
 
+Real QA uses a distinct `real_qa` mode and fresh Orb. Its context tool reads the exact prior Development PR, reviews, issue and inline comments, changed files, commits, check runs, and commit status directly from GitHub. Its report must be a comment on that exact PR, and its attested kind must equal `pass`, `fail`, or `blocked`. QA has normal tools but is instructed and scoped not to publish code; Laravel exposes no publication operation for QA. A fail starts a new Development attempt that rereads GitHub and updates the existing PR branch. A blocked result enters a human gate rather than being represented as pass or fail.
+
 Cancellation closes the Laravel attempt first, transactionally preventing any late completion. When a thread is already bound, Laravel also queues a signed, retryable command to the trusted controller to call `thread.cancel()` on that exact thread. External GitHub or Git operations already in flight may still finish and must be inspected.
 
 Self-registration is opt-in and source-default-disabled. Independently, when integration is enabled, workflow start fails closed unless both the normalized repository and initiating user's email are present in deployment-managed allowlists. This prevents a newly registered or otherwise unapproved application user from directing the owner's Amp/GitHub identity toward any target. Production registration is disabled, and a regression test proves that enabling registration alone does not grant launch authority.
@@ -107,6 +111,6 @@ Self-registration is opt-in and source-default-disabled. Independently, when int
 
 - No workflow editor; definitions are seeded in code and the database.
 - No stored review-feedback text. Reviewers publish feedback on GitHub and submit its URL.
-- Real Development has mocked transport/domain verification but no authorized live coding target yet. The existing issue `jacovanc/Orc#1` remains proof-only and must not be repurposed.
-- QA in workflow v2 is orchestration proof only, named `proof_complete`, and is never code validation or approval. Real independent QA is Milestone 7.
+- Real Development was live-proven on user-authorized `jacovanc/Orc#2`; public-repository operation is proven, private-repository operation is not claimed.
+- QA in workflow v2 remains orchestration proof only, named `proof_complete`, and is never code validation or approval. New runs may select workflow v3 for independent substantive QA.
 - Ambiguous launches are surfaced for operator action rather than automatically retried into a possible duplicate.

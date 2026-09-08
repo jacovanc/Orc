@@ -126,8 +126,8 @@ describe('Orc controller agent configuration', () => {
 		} as never)
 		await new Promise((resolve) => setTimeout(resolve, 0))
 
-		expect(agentConfigs).toHaveLength(2)
-		expect(modes.map((mode) => mode.key)).toEqual(['orc-proof-agent', 'orc-development-agent'])
+		expect(agentConfigs).toHaveLength(3)
+		expect(modes.map((mode) => mode.key)).toEqual(['orc-proof-agent', 'orc-development-agent', 'orc-qa-agent'])
 		for (const config of agentConfigs) {
 			expect(config.extends).toBe('medium')
 			expect(config.tools.include).toBeUndefined()
@@ -142,6 +142,13 @@ describe('Orc controller agent configuration', () => {
 		expect(agentConfigs[1].tools.add).toContain('workflow_record_publication')
 		expect(agentConfigs[1].model).toBe('openai/gpt-5.6-sol')
 		expect(agentConfigs[1].instructions).toContain('origin may be an Amp-hosted project remote')
+		expect(agentConfigs[2].tools.add).toEqual([
+			'workflow_read_qa_context',
+			'workflow_post_qa_report',
+			'workflow_complete',
+		])
+		expect(agentConfigs[2].model).toBe('openai/gpt-5.6-sol')
+		expect(agentConfigs[2].instructions).toContain('Do not change implementation files')
 		rmSync(root, { recursive: true, force: true })
 	})
 
@@ -161,7 +168,7 @@ describe('Orc controller agent configuration', () => {
 
 	test('marks a claimed launch without a durable thread ambiguous instead of creating a duplicate Orb', async () => {
 		const harness = await controllerHarness('claimed-without-thread')
-		expect(harness.webhookKey()).toBe('orc-stage-launch-v3')
+		expect(harness.webhookKey()).toBe('orc-stage-launch-v4')
 		const callbackTypes: string[] = []
 		globalThis.fetch = (async (_input, init) => {
 			const payload = JSON.parse(String(init?.body))

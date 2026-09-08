@@ -7,6 +7,13 @@
         $ampEnabled = (bool) config('services.amp.enabled');
         $activeLaunch = $active?->ampLaunch;
         $activeMode = $active?->stage?->config['agent_mode'] ?? null;
+        $boundPublication = $active
+            ? $run->stageRuns
+                ->where('attempt_number', '<', $active->attempt_number)
+                ->whereNotNull('github_pull_request_number')
+                ->sortByDesc('attempt_number')
+                ->first()
+            : null;
     @endphp
 
     <div class="flex flex-col justify-between gap-6 lg:flex-row lg:items-start">
@@ -37,12 +44,29 @@
             @foreach ($run->definition->stages as $stage)
                 @php
                     $isCurrent = $run->current_stage_id === $stage->id;
-                    $wasVisited = $run->stageRuns->contains('workflow_stage_id', $stage->id);
+                    $latestStageAttempt = $run->stageRuns
+                        ->where('workflow_stage_id', $stage->id)
+                        ->sortByDesc('attempt_number')
+                        ->first();
+                    $wasVisited = (bool) $latestStageAttempt;
+                    $stepClass = $isCurrent
+                        ? 'border-orange-400/50 bg-orange-400/10 text-orange-300 shadow-[0_0_24px_rgba(249,115,22,.12)]'
+                        : match ($latestStageAttempt?->outcome) {
+                            'fail' => 'border-red-400/25 bg-red-400/[0.07] text-red-300',
+                            'blocked' => 'border-amber-300/25 bg-amber-300/[0.07] text-amber-200',
+                            default => $wasVisited
+                                ? 'border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-400'
+                                : 'border-white/[0.08] bg-black/10 text-zinc-700',
+                        };
                 @endphp
                 <div class="flex flex-1 items-start {{ $loop->last ? '' : 'after:mt-5 after:h-px after:min-w-8 after:flex-1 after:bg-white/10' }}">
                     <div class="min-w-[7rem]">
-                        <div class="flex h-10 w-10 items-center justify-center rounded-xl border text-sm font-semibold {{ $isCurrent ? 'border-orange-400/50 bg-orange-400/10 text-orange-300 shadow-[0_0_24px_rgba(249,115,22,.12)]' : ($wasVisited ? 'border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-400' : 'border-white/[0.08] bg-black/10 text-zinc-700') }}">
-                            @if ($wasVisited && ! $isCurrent) ✓ @else {{ str_pad($stage->position, 2, '0', STR_PAD_LEFT) }} @endif
+                        <div class="flex h-10 w-10 items-center justify-center rounded-xl border text-sm font-semibold {{ $stepClass }}">
+                            @if (! $isCurrent && $latestStageAttempt?->outcome === 'fail') ×
+                            @elseif (! $isCurrent && $latestStageAttempt?->outcome === 'blocked') !
+                            @elseif ($wasVisited && ! $isCurrent) ✓
+                            @else {{ str_pad($stage->position, 2, '0', STR_PAD_LEFT) }}
+                            @endif
                         </div>
                         <p class="mt-3 text-sm font-medium {{ $isCurrent ? 'text-white' : 'text-zinc-500' }}">{{ $stage->name }}</p>
                         <p class="mt-1 font-mono text-[9px] uppercase tracking-wider text-zinc-700">{{ $stage->type->value }}</p>
@@ -63,6 +87,8 @@
                             @if ($ampEnabled)
                                 @if ($activeMode === 'real_development')
                                     A fresh private Amp thread and Orb is implementing the bound issue with normal Amp tools and your existing native repository access. Orc never provisions or copies GitHub credentials.
+                                @elseif ($activeMode === 'real_qa')
+                                    A fresh private Amp thread and Orb is independently inspecting and testing the exact bound pull request. QA may not change implementation, push, merge, or grant human approval.
                                 @else
                                     A fresh private Amp thread and Orb is running an integration proof. It has normal Amp tools but is instructed to make no code changes; its result is not code validation or approval.
                                 @endif
@@ -78,6 +104,8 @@
                         <span class="font-mono text-[10px] uppercase tracking-wider text-zinc-600">{{ $active->stage->type->value }} stage</span>
                         @if ($activeMode === 'real_development')
                             <span class="rounded-full border border-sky-300/20 bg-sky-300/[0.08] px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-sky-200">Real Development</span>
+                        @elseif ($activeMode === 'real_qa')
+                            <span class="rounded-full border border-violet-300/20 bg-violet-300/[0.08] px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-violet-200">Substantive QA</span>
                         @elseif ($activeMode)
                             <span class="rounded-full border border-amber-300/20 bg-amber-300/[0.08] px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-amber-200">Integration proof</span>
                         @endif
@@ -105,6 +133,11 @@
                                 @else
                                     <p class="mt-5 text-xs text-zinc-500">The thread link will appear after Amp acknowledges the launch.</p>
                                 @endif
+                                @if ($activeMode === 'real_qa' && $boundPublication?->github_pull_request_url)
+                                    <a class="mt-3 inline-flex items-center gap-2 rounded-xl border border-violet-300/20 bg-violet-300/[0.07] px-4 py-3 font-mono text-xs text-violet-200 transition hover:bg-violet-300/[0.12]" href="{{ $boundPublication->github_pull_request_url }}" target="_blank" rel="noopener">
+                                        Inspect bound PR #{{ $boundPublication->github_pull_request_number }} <span>↗</span>
+                                    </a>
+                                @endif
                                 @if ($activeLaunch?->delivery_status === \App\Domain\Workflow\AmpDeliveryStatus::Ambiguous || $activeLaunch?->launch_status === \App\Domain\Workflow\AmpLaunchStatus::Ambiguous)
                                     <div class="mt-5 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-xs leading-5 text-amber-100/70">
                                         Delivery has an ambiguous network outcome. Orc will not launch a duplicate; cancel this run or reconcile it from the Amp callback history.
@@ -130,9 +163,17 @@
                             </div>
                         @endif
                     @else
-                        @if ($run->definition->version >= 2 && $active->stage->key === 'human_review')
+                        @if ($run->definition->version === 2 && $active->stage->key === 'human_review')
                             <div class="mb-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-xs leading-5 text-amber-100/80">
                                 <strong class="text-amber-200">Human release gate.</strong> QA was an integration proof only; no independent substantive code validation has occurred yet.
+                            </div>
+                        @elseif ($run->definition->version >= 3 && $active->stage->key === 'human_review')
+                            <div class="mb-4 rounded-xl border border-violet-300/20 bg-violet-300/[0.07] px-4 py-3 text-xs leading-5 text-violet-100/80">
+                                <strong class="text-violet-200">Substantive QA passed.</strong> This is still a separate human release decision; Orc never approves or merges automatically.
+                            </div>
+                        @elseif ($active->stage->key === 'qa_blocked')
+                            <div class="mb-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-xs leading-5 text-amber-100/80">
+                                <strong class="text-amber-200">Operator intervention required.</strong> QA could not reach a trustworthy verdict. Inspect its GitHub report before retrying in a fresh thread and Orb or cancelling the run.
                             </div>
                         @endif
                         @foreach ($outcomes as $transition)
@@ -156,9 +197,9 @@
                                 <form method="POST" action="{{ route('workflows.attempts.human-action', [$run, $active]) }}" class="rounded-2xl border border-sky-300/15 bg-sky-300/[0.05] p-5">
                                     @csrf
                                     <input type="hidden" name="outcome" value="retry">
-                                    <p class="text-sm font-medium text-sky-100">Retry Development</p>
+                                    <p class="text-sm font-medium text-sky-100">Retry {{ $transition->toStage->key === 'development' ? 'Development' : $transition->toStage->name }}</p>
                                     <p class="mt-1 text-xs leading-5 text-sky-200/60">Starts a new numbered attempt in a fresh thread and Orb. The agent rereads GitHub from scratch.</p>
-                                    <button class="button-primary mt-4 bg-sky-500 hover:bg-sky-400" type="submit">Retry <span class="opacity-60">→ Real Development</span></button>
+                                    <button class="button-primary mt-4 bg-sky-500 hover:bg-sky-400" type="submit">Retry <span class="opacity-60">→ {{ $transition->toStage->key === 'development' ? 'Development' : $transition->toStage->name }}</span></button>
                                 </form>
                             @endif
                         @endforeach
@@ -200,6 +241,8 @@
                                     {{ $attempt->stage->name }}
                                     @if (($attempt->stage->config['agent_mode'] ?? null) === 'real_development')
                                         <span class="ml-2 rounded-full border border-sky-300/20 px-2 py-0.5 font-mono text-[8px] uppercase text-sky-200">real</span>
+                                    @elseif (($attempt->stage->config['agent_mode'] ?? null) === 'real_qa')
+                                        <span class="ml-2 whitespace-nowrap rounded-full border border-violet-300/20 px-2 py-0.5 font-mono text-[8px] uppercase text-violet-200">substantive QA</span>
                                     @elseif (isset($attempt->stage->config['agent_mode']))
                                         <span class="ml-2 rounded-full border border-amber-300/20 px-2 py-0.5 font-mono text-[8px] uppercase text-amber-200">proof</span>
                                     @endif

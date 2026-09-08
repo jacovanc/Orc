@@ -21,9 +21,12 @@ class AmpLaunchPayload
         $attempt = $launch->stageRun;
         $run = $attempt->workflowRun;
         $priorPullRequest = $run->stageRuns()
+            ->where('attempt_number', '<', $attempt->attempt_number)
             ->whereNotNull('github_pull_request_number')
             ->latest('attempt_number')
             ->first();
+        $reusePriorPublication = ($attempt->stage->config['reuse_prior_publication'] ?? false)
+            && $priorPullRequest?->github_branch;
 
         return [
             'schema_version' => 1,
@@ -42,7 +45,10 @@ class AmpLaunchPayload
             'report_nonce' => $launch->report_nonce,
             'stage_capability_url' => url('/api/integrations/amp/stage-capability'),
             'stage_capability_token' => $launch->capability_secret,
-            'expected_branch' => "orc/stage-{$attempt->getKey()}-attempt-{$attempt->attempt_number}",
+            'expected_branch' => $reusePriorPublication
+                ? $priorPullRequest->github_branch
+                : "orc/stage-{$attempt->getKey()}-attempt-{$attempt->attempt_number}",
+            'prior_github_branch' => $priorPullRequest?->github_branch,
             'prior_pull_request_number' => $priorPullRequest?->github_pull_request_number,
             'prior_pull_request_url' => $priorPullRequest?->github_pull_request_url,
             'allowed_outcomes' => $attempt->stage->outgoingTransitions

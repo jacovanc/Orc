@@ -419,6 +419,7 @@ class WorkflowEngine
         if (! $attempt || ! $attempt->ampLaunch) {
             throw new WorkflowConflict('This thread is not bound to an Orc stage attempt.');
         }
+        $priorPublication = $this->priorPublication($attempt);
 
         return [
             'schema_version' => 1,
@@ -438,6 +439,9 @@ class WorkflowEngine
             'github_report_comment_id' => $attempt->github_report_comment_id,
             'github_report_kind' => $attempt->github_report_kind,
             'expected_branch' => $this->expectedBranch($attempt),
+            'prior_github_branch' => $priorPublication?->github_branch,
+            'prior_pull_request_number' => $priorPublication?->github_pull_request_number,
+            'prior_pull_request_url' => $priorPublication?->github_pull_request_url,
             'github_branch' => $attempt->github_branch,
             'github_pull_request_number' => $attempt->github_pull_request_number,
             'github_pull_request_url' => $attempt->github_pull_request_url,
@@ -698,7 +702,7 @@ class WorkflowEngine
             }
         } else {
             $reportUrl = $payload['github_report_url'] ?? null;
-            $this->assertGitHubReport($launch->stageRun->workflowRun, $reportUrl);
+            $this->assertGitHubReport($launch->stageRun, $reportUrl);
         }
 
         $mode = $this->agentMode($launch->stageRun->stage);
@@ -713,6 +717,9 @@ class WorkflowEngine
         }
         if (! empty($payload['capability_authenticated']) && $mode === 'real_development' && $launch->stageRun->github_report_kind !== $outcome) {
             throw new WorkflowConflict('The Development report kind must match its completion outcome.');
+        }
+        if (! empty($payload['capability_authenticated']) && $mode === 'real_qa' && $launch->stageRun->github_report_kind !== $outcome) {
+            throw new WorkflowConflict('The QA report kind must match its completion outcome.');
         }
         if (! empty($payload['capability_authenticated']) && $mode === 'proof_qa' && $launch->stageRun->github_report_kind !== 'proof') {
             throw new WorkflowConflict('QA integration proof requires a proof-only report.');
@@ -758,11 +765,13 @@ class WorkflowEngine
 
         $this->assertCurrentAmpAttempt($launch->stageRun);
         $this->bindAmpThread($launch->stageRun, $threadId);
-        $this->assertGitHubReport($launch->stageRun->workflowRun, $reportUrl, $commentId);
+        $this->assertGitHubReport($launch->stageRun, $reportUrl, $commentId);
         if (! empty($payload['capability_authenticated'])) {
-            $allowedKinds = $this->agentMode($launch->stageRun->stage) === 'real_development'
-                ? ['success', 'blocked']
-                : ['proof'];
+            $allowedKinds = match ($this->agentMode($launch->stageRun->stage)) {
+                'real_development' => ['success', 'blocked'],
+                'real_qa' => ['pass', 'fail', 'blocked'],
+                default => ['proof'],
+            };
             if (! is_string($reportKind) || ! in_array($reportKind, $allowedKinds, true)) {
                 throw new WorkflowConflict('The stage report kind is invalid for this agent mode.');
             }
@@ -999,7 +1008,7 @@ class WorkflowEngine
     }
 
     private function assertGitHubReport(
-        WorkflowRun $run,
+        StageRun $attempt,
         mixed $reportUrl,
         mixed $commentId = null,
     ): void {
@@ -1007,10 +1016,22 @@ class WorkflowEngine
             throw new WorkflowConflict('Amp must publish its stage report on GitHub before completing.');
         }
 
+        $run = $attempt->workflowRun;
         $path = strtolower(rtrim((string) parse_url($reportUrl, PHP_URL_PATH), '/'));
-        $expectedPrefix = strtolower('/'.$run->github_repository.'/issues/'.$run->github_issue_number);
-        if ($path !== $expectedPrefix) {
-            throw new WorkflowConflict('The Amp report URL must belong to this workflow issue.');
+        if ($this->agentMode($attempt->stage) === 'real_qa') {
+            $publication = $this->priorPublication($attempt);
+            if (! $publication?->github_pull_request_number) {
+                throw new WorkflowConflict('Independent QA requires a verified Development pull request.');
+            }
+            $expectedPath = strtolower('/'.$run->github_repository.'/pull/'.$publication->github_pull_request_number);
+            if ($path !== $expectedPath) {
+                throw new WorkflowConflict('The QA report URL must belong to the pull request bound to this attempt.');
+            }
+        } else {
+            $expectedPath = strtolower('/'.$run->github_repository.'/issues/'.$run->github_issue_number);
+            if ($path !== $expectedPath) {
+                throw new WorkflowConflict('The Amp report URL must belong to this workflow issue.');
+            }
         }
 
         if ($commentId !== null) {
@@ -1202,6 +1223,23 @@ class WorkflowEngine
 
     private function expectedBranch(StageRun $attempt): string
     {
+        if ($attempt->stage->config['reuse_prior_publication'] ?? false) {
+            $prior = $this->priorPublication($attempt);
+            if ($prior?->github_branch) {
+                return $prior->github_branch;
+            }
+        }
+
         return "orc/stage-{$attempt->getKey()}-attempt-{$attempt->attempt_number}";
+    }
+
+    private function priorPublication(StageRun $attempt): ?StageRun
+    {
+        return StageRun::query()
+            ->where('workflow_run_id', $attempt->workflow_run_id)
+            ->where('attempt_number', '<', $attempt->attempt_number)
+            ->whereNotNull('github_pull_request_number')
+            ->latest('attempt_number')
+            ->first();
     }
 }

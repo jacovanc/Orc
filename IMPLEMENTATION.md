@@ -2,7 +2,7 @@
 
 ## Scope
 
-Milestones 1–6: authenticated Laravel application, versioned workflow domain, transactional workflow engine, seeded proof and real-Development workflows, durable Laravel↔Amp orchestration, operational UI, tests, and production deployment. Milestone 7 independent substantive QA and the workflow editor remain out of scope.
+Milestones 1–7: authenticated Laravel application, versioned workflow domain, transactional workflow engine, seeded proof/real-Development/independent-QA workflows, durable Laravel↔Amp orchestration, operational UI, tests, and production deployment. The workflow editor and Milestone 8 feedback automation remain out of scope.
 
 ## Work log
 
@@ -36,6 +36,10 @@ Milestones 1–6: authenticated Laravel application, versioned workflow domain, 
 - 2026-09-08: Deployed the tracked live-acceptance record and improved controller guidance in Laravel Cloud deployment `depl-a2b241fa-7d9b-42ba-bd80-6004991a185c` from commit `8ba8c4b36baf742c371b36e55f9fe20df443d994`. Versioned the durable controller key to v3 so the verified-target-remote behavior cannot silently retain the already loaded v2 prompt.
 - 2026-09-08: Corrected `RUN-0017` ownership after the acceptance bootstrap selected a different allowlisted operator than the account the user actually used. Added the user-specified existing account to the operator allowlist without removing prior entries, deployed a guard that rechecks both allowlists before any human action can launch another agent, transactionally reassigned only `RUN-0017`, and recorded append-only `workflow.owner_reassigned` audit metadata using user IDs rather than email addresses. The user had meanwhile merged PR #3 directly on GitHub; Orc still required its separate Human Review action and did not infer approval from that external merge.
 - 2026-09-08: The user completed the separate Human Review approval in production. Verified `RUN-0017` is `completed` at terminal stage `done`, has a completion timestamp, exactly one recorded approval event, terminal attempt 4, and no active attempt.
+- 2026-09-08: Documented the Milestone 7 design before implementation. Added immutable workflow v3 with Development `success|blocked`, independent QA `pass|fail|blocked`, fail-to-remediation, separate Development/QA blocked human gates, Human Review, and Done; v1/v2 remain unchanged.
+- 2026-09-08: Added a distinct GPT-5.6 Sol independent-QA controller mode with normal default tools plus additive workflow tools. The global secretless worker now reads the exact bound PR, reviews, discussion, files, commits, check runs, and commit status through native `gh`, publishes one substantive PR report, and has no QA code-publication operation.
+- 2026-09-08: Extended the central engine's existing stage capability with exact QA PR-report and report-kind binding. QA pass enters Human Review, fail allocates fresh Development context on the existing PR branch, and blocked enters explicit operator intervention. Cancellation, callback deduplication, row locks, stale/foreign-thread rejection, allowlists, native-auth-only behavior, and one launch/thread/Orb per StageRun remain unchanged.
+- 2026-09-08: Added Milestone 7 domain/integration/worker/controller/UI regression coverage and rendered active QA, QA-fail remediation, QA-blocked, and post-pass Human Review states. Visual inspection caught and fixed a clipped QA badge and a misleading green visited marker for failed QA; failed/blocked stages now use red/amber markers.
 
 ## Verification
 
@@ -66,6 +70,8 @@ Milestones 1–6: authenticated Laravel application, versioned workflow domain, 
 - Final v3 controller deployment `depl-a2b2548c-a553-4a4b-bdad-d9d0566262a3`: **`deployment.succeeded`**, source commit `388dbccafd85a49cf3953009213c0bf247bd5889`. Production matched the newly loaded owner-only webhook capability without exposing it; registration remained disabled, integration and both independent allowlists remained active/non-empty, `/register` returned **404**, and `RUN-0017` remained waiting at Human Review. Persistent events showed one claimed launch per agent attempt plus one safely deduplicated Development reconciliation (`duplicate_claim`/`already_launched`), with no extra Orb, report, or completion.
 - Operator ownership hardening deployment `depl-a2b282cc-a8b1-48d3-a345-965fe60983a3`: **`deployment.succeeded`**, source commit `b7195cc9b1b068d594780d5439547b3d2efe85ef`. Production verification confirmed the designated account owns `RUN-0017`, is explicitly allowlisted, and has exactly one append-only reassignment event; registration remains disabled. Prior allowlist entries were preserved.
 - Post-deployment HTTP smoke: `/`, `/login`, and `/up` returned **200**; `/register` returned **404**; unauthenticated `/workflows` returned **302** to `/login`; the compiled CSS asset returned **200**.
+- Pre-deployment Milestone 7 checks: Laravel **82 passed, 484 assertions**; focused Milestone 7 **8 passed, 114 assertions**; controller **4 passed, 27 expectations**; global worker **9 passed, 25 expectations**; Pint, Composer validation, Vite production build, fresh migration/seed, both plugin bundles, and `git diff --check` passed.
+- Rendered Milestone 7 states passed browser console/page-error checks and final visual inspection: `.amp/in/artifacts/m7-running-qa.png`, `.amp/in/artifacts/m7-qa-fail-remediation.png`, `.amp/in/artifacts/m7-qa-blocked.png`, and `.amp/in/artifacts/m7-human-review.png`.
 - Laravel Cloud background process `process-a2b0eb69-ac71-4ef1-806e-93a70c442d92`: one database worker on queue `amp-launches`, four tries, bounded backoff, and a 30-second worker timeout.
 
 ## Deployment

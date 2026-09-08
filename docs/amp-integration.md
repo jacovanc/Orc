@@ -1,6 +1,6 @@
 # Laravel↔Amp integration runbook
 
-This runbook covers the Milestones 4–6 controller/worker boundary, deployment configuration, failure handling, and proof status.
+This runbook covers the Milestones 4–7 controller/worker boundary, deployment configuration, failure handling, and proof status.
 
 ## Components and trust boundary
 
@@ -41,7 +41,7 @@ Generate two independent random values of at least 32 bytes. Never reuse a secre
 
 There is deliberately no GitHub credential in this file and no controller secret in the global worker or Amp project secrets. Without this file, the project plugin returns before registering a webhook, lifecycle hook, or controller agent mode; this separates untrusted coding Orbs from the trusted controller role.
 
-Reload the project plugin in the configured Amp-managed controller Orb. Registration key `orc-stage-launch-v2` deliberately replaced the proof-only v1 handler during Milestone 6 acceptance; v3 adds mandatory target-repository/default-branch verification after the live run exposed the initial Amp-hosted remote. Future launch-behavior changes must use another versioned key because an existing durable capability can retain its previously loaded handler. The controller writes the capability URL to `.amp/runtime/launch-webhook-url` with mode `0600`; treat that URL like a secret and update Laravel's `AMP_LAUNCH_WEBHOOK_URL` whenever the registration key changes.
+Reload the project plugin in the configured Amp-managed controller Orb. Registration key `orc-stage-launch-v2` deliberately replaced the proof-only v1 handler during Milestone 6 acceptance; v3 added mandatory target-repository/default-branch verification after the live run exposed the initial Amp-hosted remote; v4 adds the independent QA agent and prompts. Future launch-behavior changes must use another versioned key because an existing durable capability can retain its previously loaded handler. The controller writes the capability URL to `.amp/runtime/launch-webhook-url` with mode `0600`; treat that URL like a secret and update Laravel's `AMP_LAUNCH_WEBHOOK_URL` whenever the registration key changes.
 
 Configure Laravel without exposing values:
 
@@ -108,9 +108,17 @@ Real Development:
 
 Before a GitHub comment is posted, the worker acquires one persistent report-publication claim through the per-launch capability. Concurrent callers reconcile the authenticated user's paginated nonce marker rather than post twice. If a claimed publication has no visible comment, Orc reports ambiguity instead of risking a duplicate.
 
+## Independent substantive QA
+
+Workflow v3 replaces proof-only QA with `real_qa`. A distinct GPT-5.6 Sol agent starts in its own fresh private thread and Orb with normal Amp tools plus `workflow_read_qa_context`, `workflow_post_qa_report`, and `workflow_complete`.
+
+The context tool binds to the latest verified Development publication and reads the original issue/discussion plus exact pull-request metadata, discussion, reviews, inline comments, files, commits, check runs, and commit status using native `gh`. QA checks out and tests the PR but must not edit implementation, commit, push, merge, approve, or close anything. Its only Orc report operation posts a nonce-bound substantive comment to the exact PR.
+
+`pass` enters Human Review but does not approve or merge. `fail` starts a fresh Development StageRun, capability, thread, and Orb; remediation rereads the GitHub QA findings and updates the existing PR head branch. `blocked` enters QA Blocked Review, where an allowlisted owner must inspect GitHub and explicitly retry QA or cancel. Workflow v2 remains proof-only and unchanged.
+
 ## Completion, safety, and cancellation
 
-Laravel accepts completion only when the attempt is current, the thread matches, the outcome is configured, and required evidence is already bound. Real success requires the deterministic branch, verified open PR, and success report. Blocked requires a blocked report. Proof QA requires a proof report and `proof_complete`.
+Laravel accepts completion only when the attempt is current, the thread matches, the outcome is configured, and required evidence is already bound. Real Development success requires the expected branch, verified open PR, and success report. Blocked Development requires a blocked report. Proof QA requires a proof report and `proof_complete`. Real QA requires a report on its exact bound PR whose kind matches `pass`, `fail`, or `blocked`.
 
 An explicit `workflow_complete` is the normal path. The controller's `agent.end`/monitor safety net gives one mode-specific corrective turn, then reports `stage.failed`; it never guesses an outcome. Reconciliation deliveries restore monitoring for up to one hour after acknowledgement.
 
@@ -132,9 +140,10 @@ Cancellation first closes Laravel's active slot and launch under locks, so late 
 2. Run the controller and global-worker Bun tests and bundle both against external `@ampcode/plugin`.
 3. Confirm the trusted controller runtime file contains only the three documented names and has mode `0600`; never print values.
 4. Confirm no obsolete Orc-owned GitHub or worker controller secrets remain in Amp project configuration.
-5. Verify production migration status, queue process, `/register` 404, and authenticated workflow v2 UI.
+5. Verify production migration status, queue process, `/register` 404, and authenticated workflow v3 UI.
 6. Use issue `jacovanc/Orc#1` only for harmless integration proof. Do not use it for coding.
 7. For real Development proof, require a separately designated small issue; confirm the new thread ID, branch, open PR, report, checks, and transition to proof-only QA.
+8. For real QA proof, confirm the exact bound PR, substantive PR report, distinct QA thread/Orb, honest outcome, and no QA code publication or automatic human approval.
 
 ## Live evidence
 
