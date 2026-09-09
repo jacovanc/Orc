@@ -35,7 +35,7 @@
 
         <section class="panel mt-8 p-6 sm:p-8">
             <div class="flex flex-wrap items-start justify-between gap-5">
-                <div><h2 class="font-semibold text-white">Agent-assisted setup</h2><p class="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Copy this prompt into an already-authenticated agent in the Amp project you want to link. Orc binds the identity reported by that project on first claim; no ID, webhook URL, or signing secret needs to be copied by hand.</p></div>
+                <div><h2 class="font-semibold text-white">Agent-assisted setup</h2><p class="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Copy this self-bootstrapping prompt into an already-authenticated agent in the Amp project you want to link. It installs Orc into a new Amp account when needed, then binds the identity reported by that project; no ID, webhook URL, or signing secret needs to be copied by hand.</p></div>
                 @if ($setup)<span class="status-pill status-{{ $setup->displayStatus() }}">setup {{ $setup->displayStatus() }}</span>@endif
             </div>
 
@@ -46,6 +46,7 @@
                         <button class="button-primary" type="button" @click="navigator.clipboard.writeText(document.getElementById('amp-setup-prompt').value); copied = true; setTimeout(() => copied = false, 1800)"><span x-text="copied ? 'Copied' : 'Copy setup prompt'">Copy setup prompt</span></button>
                         <span class="text-xs text-zinc-600">Expires {{ $setup->expires_at->diffForHumans() }} · single connection, thread, and Amp project only</span>
                     </div>
+                    <p class="mt-4 text-xs leading-5 text-zinc-600">A fresh Amp account needs no Orc prerequisite. The agent first publishes Orc’s pinned worker to your Personal Plugins, asks you to reload, and then performs project pairing.</p>
                     @if ($setup->status === 'claimed')
                         <p class="mt-4 rounded-xl border border-sky-300/15 bg-sky-300/[0.04] p-4 text-xs leading-5 text-sky-100/70">The setup agent claimed this prompt. If it asks for a plugin reload, run <strong class="text-sky-100">plugins: reload</strong> in that same Amp thread, then tell it to continue.</p>
                     @endif

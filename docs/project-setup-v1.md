@@ -9,20 +9,23 @@ The deployed application serves this version publicly at `/docs/project-setup-v1
 1. In Orc, create a Project with a display name and its canonical `owner/repository`. You do not need to find or enter an Amp project ID.
 2. Open **Project → Settings** and copy the generated setup prompt.
 3. Paste it into an already-authenticated agent thread opened in the Amp project you want to link. This becomes the dedicated trusted controller thread for the new connection; use a thread you will keep unarchived.
-4. The agent calls `orc_setup_project`. The first valid claim atomically binds the actual `AMP_PROJECT_ID` to this Project and connection; every retry and completion must match it. The tool claims the short-lived capability, verifies the controller source SHA-256, and writes only:
+4. The prompt assumes no existing Orc installation. The agent loads Amp's built-in `building-plugins` guidance, downloads the immutable `orc-worker-v1.ts` artifact from the deployed Orc domain, verifies the prompt-pinned SHA-256, inspects it, and publishes only that file to the authenticated user's writable **Personal Plugins** repository. It preserves unrelated plugins. A project, workspace, or machine-only installation is insufficient because later workflow stages run in fresh Orbs.
+5. Run **plugins: reload** when the setup agent asks. New threads load the published Personal Plugin automatically. If the account has no writable Personal Plugins scope, setup stops with that explicit prerequisite rather than pretending a reload can create the tool.
+6. Once `orc_setup_project` is active, the agent calls it without placing the setup capability in a shell command or file. The first valid claim atomically binds the actual `AMP_PROJECT_ID` to this Project and connection; every retry and completion must match it. The tool claims the short-lived capability, verifies the controller source SHA-256, and writes only:
    - `.amp/plugins/orc-integration/index.ts`;
    - `.amp/runtime/orc-plugin.json` with mode `0600`;
    - the controller-generated `.amp/runtime/launch-webhook-url` with mode `0600`.
-5. Amp's Plugin API has no programmatic reload operation. If requested, run **plugins: reload** once in the same thread, then tell the agent to continue. The second tool call submits the webhook directly over HTTPS and queues verification.
-6. Refresh Orc. A successful harmless check shows the connection as **verified**, links the actual webhook-owning controller thread reported by the handler, and separately links its fresh verification thread. A returned webhook URL or HTTP 202 alone does not prove handler ownership or success. If Amp reports a different owner than the setup thread, Orc fails verification instead of fabricating the binding.
+7. The newly installed project controller requires another **plugins: reload**. Run it in the same thread when requested, then tell the agent to continue. The second tool call submits the webhook directly over HTTPS and queues verification.
+8. Refresh Orc. A successful harmless check shows the connection as **verified**, links the actual webhook-owning controller thread reported by the handler, and separately links its fresh verification thread. A returned webhook URL or HTTP 202 alone does not prove handler ownership or success. If Amp reports a different owner than the setup thread, Orc fails verification instead of fabricating the binding.
 
-The tool modifies no unrelated plugin. The personal `orc-worker` User Plugin must already be active; the presence of `orc_setup_project` proves that prerequisite. Global User Plugin publication is managed separately from project pairing.
+The setup is therefore two-phase: Personal Worker bootstrap, then project pairing. It never assumes `orc_setup_project` already exists. The worker artifact contains only `orc_setup_project`, `workflow_verify_project_connection`, and `workflow_complete`; ordinary GitHub work continues to use Amp's native tools.
 
 ## Capability and secret boundary
 
 - Project creation allocates a durable connection UUID and distinct directional secrets before webhook registration, removing the old circular dependency.
 - The setup capability expires after 20 minutes and is bound on first claim to one connection, the actual `AMP_PROJECT_ID`, owner, and Amp thread. It can be retried only by that same claimant. Reissue revokes prior unconsumed setup capabilities.
 - The copied prompt necessarily carries the narrow setup capability because the Plugin API provides no secret-input channel for a custom tool. It is not a reusable launch/callback secret. The agent is told not to repeat it; API responses never reflect it, responses are `no-store`, and application code does not log it.
+- Worker bootstrap does not use the setup capability. The generated prompt prohibits putting it in shell commands, plugin repositories, files, or logs; it is supplied only to `orc_setup_project` after the verified Personal Plugin is active.
 - The HTTPS claim response gives the setup tool—not a workflow prompt—the pinned controller and runtime material. The tool writes it only to gitignored, owner-readable runtime storage. Fresh workflow Orbs receive only per-stage capabilities, never directional controller secrets.
 - Controller source is sent with and checked against a SHA-256 pinned into the setup row. Completion must attest that exact digest and an SSRF-guarded Amp webhook URL.
 - Setup completion immediately queues the existing harmless fresh-Orb placement/native repository-read verification. Only a verified connection can launch workflows.

@@ -38,9 +38,9 @@ Orc does **not** store issue bodies, prompts, generated code, reports, discussio
 The integration is disabled by default. It requires a database queue worker and one trusted controller registered inside every Amp project Orc should route to.
 
 1. Create the Orc Project with a display name and canonical `owner/repository`. You do not need to find an Amp project ID; Orc immediately preallocates an immutable pending connection identity.
-2. Open Project Settings and copy its short-lived setup prompt into an already-authenticated agent in that exact Amp project.
-3. The `orc_setup_project` User Plugin tool binds the actual `AMP_PROJECT_ID` from that selected project, installs the SHA-256-pinned project controller, exchanges directional secrets and the webhook over HTTPS, and queues harmless verification. It neither overwrites unrelated plugins nor handles GitHub credentials.
-4. Amp currently requires one manual **plugins: reload** after first installation; tell the same setup agent to continue afterward. No webhook URL or signing secret is copied by hand.
+2. Open Project Settings and copy its short-lived, self-bootstrapping setup prompt into an already-authenticated agent in that exact Amp project. No Orc plugin or tool needs to exist yet.
+3. The agent verifies Orc's immutable public worker artifact and publishes it—without touching unrelated plugins—to your Personal Plugins repository. Run **plugins: reload** when asked; the worker is then available to this and future fresh Orbs.
+4. The resulting `orc_setup_project` tool binds the actual `AMP_PROJECT_ID` from that selected project, installs the SHA-256-pinned project controller, exchanges directional secrets and the webhook over HTTPS, and queues harmless verification. It neither overwrites unrelated plugins nor handles GitHub credentials. Run the additional controller **plugins: reload** when requested. No webhook URL or signing secret is copied by hand.
 5. Refresh Orc for the fresh-Orb placement and native `gh` read result. Repeat independently for every Project/Amp project.
 6. Set `QUEUE_CONNECTION=database`, run a worker for `amp-launches`, and enable `AMP_INTEGRATION_ENABLED` only after application setup. No global GitHub token, repository allowlist, or mutable-email authority is used.
 

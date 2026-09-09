@@ -75,19 +75,30 @@ class AmpProjectConnectionService
 
     public function setupPrompt(AmpConnectionSetup $setup): string
     {
+        $workerSource = (string) file_get_contents(resource_path('amp/orc-worker-v1.ts'));
+
         return implode("\n", [
             'Set up this existing Orc Project from this exact Amp project.',
             '',
             'Consent and scope: you may install/update only the personal Orc worker integration and this project’s .amp/plugins/orc-integration controller, register its webhook, and run one harmless fresh-Orb placement/native repository-read verification. Do not change code, start a workflow, create a branch or pull request, publish GitHub content, merge anything, or alter unrelated plugins.',
             '',
-            'Use the already-installed `orc_setup_project` tool with the fields below. Do not print, quote, summarize, or place the capability in shell commands/files. The tool exchanges controller material over HTTPS and writes only owner-readable gitignored runtime configuration.',
+            'This prompt is self-bootstrapping. Do not assume that Orc or any Orc plugin is already installed.',
+            '',
+            '1. Load the `building-plugins` skill before inspecting or changing plugins.',
+            '2. Ensure the exact worker below is published as `orc-worker.ts` in my writable Personal User Plugins repository (not a project, workspace, or machine-only plugin). Preserve every unrelated plugin. Fetch it only over HTTPS, verify its SHA-256 before installing it, inspect the source, and use Amp’s supported global User Plugins repository workflow to commit and push only this worker. The consent above authorizes that personal-plugin publication. If the repository already contains this exact digest, do not create another commit.',
+            '   worker_url: '.route('integrations.amp.worker-plugin-v1'),
+            '   worker_sha256: '.hash('sha256', $workerSource),
+            '3. Never put the setup capability below in a shell command, file, Git commit, plugin source, or log. Worker installation does not need it.',
+            '4. If the `orc_setup_project` tool is not active after publishing the worker, ask me to run “plugins: reload” once. After the reload, continue in this same thread and call that tool with the fields below.',
+            '',
+            'The setup tool exchanges controller material over HTTPS and writes only owner-readable gitignored runtime configuration.',
             '',
             'setup_url: '.url('/api/integrations/amp/project-setup'),
             'setup_id: '.$setup->public_id,
             'setup_capability: '.$setup->token,
             '',
             'This is Orc setup protocol v1. Public authoritative runbook: '.route('docs.project-setup-v1'),
-            'If the tool reports that Amp must reload plugins, ask me to run “plugins: reload” once, then call `orc_setup_project` again with the same fields. Do not claim setup or verification succeeded until the tool confirms it.',
+            'After the tool installs this project’s controller, it may require one additional “plugins: reload”; ask me, then call `orc_setup_project` again with the same fields. Do not claim setup or verification succeeded until the tool confirms it.',
             'This setup thread becomes the dedicated owner of the connection webhook. Keep it unarchived while Orc uses this connection. Ordinary idle Orb sleep is expected and incoming events wake it; do not add polling or keep-alive work.',
         ]);
     }

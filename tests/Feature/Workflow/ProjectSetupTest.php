@@ -42,6 +42,25 @@ class ProjectSetupTest extends TestCase
             ->assertSeeText('GitHub access invariant');
     }
 
+    public function test_versioned_worker_is_a_public_immutable_three_tool_artifact(): void
+    {
+        $source = (string) file_get_contents(resource_path('amp/orc-worker-v1.ts'));
+        $this->assertSame(3, substr_count($source, 'amp.registerTool({'));
+        $this->assertStringNotContainsString('GH_TOKEN', $source);
+        $this->assertStringNotContainsString('GITHUB_TOKEN', $source);
+        $this->assertStringNotContainsString('ORC_GITHUB_TOKEN', $source);
+
+        $this->get(route('integrations.amp.worker-plugin-v1'))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'text/plain; charset=UTF-8')
+            ->assertHeader('Cache-Control', 'immutable, max-age=31536000, public')
+            ->assertHeader('ETag', '"'.hash('sha256', $source).'"')
+            ->assertHeader('X-Content-Type-Options', 'nosniff')
+            ->assertSee('orc_setup_project', false)
+            ->assertSee('workflow_verify_project_connection', false)
+            ->assertSee('workflow_complete', false);
+    }
+
     public function test_project_creation_preallocates_connection_and_copyable_setup_prompt(): void
     {
         $response = $this->actingAs($this->owner)->post(route('projects.store'), [
@@ -75,9 +94,15 @@ class ProjectSetupTest extends TestCase
             ->assertOk()
             ->assertSee('Copy setup prompt')
             ->assertSee('orc_setup_project')
+            ->assertSee('self-bootstrapping')
+            ->assertSee('Personal User Plugins repository')
+            ->assertSee(route('integrations.amp.worker-plugin-v1'), false)
+            ->assertSee(hash('sha256', (string) file_get_contents(resource_path('amp/orc-worker-v1.ts'))))
             ->assertSee($setup->public_id)
             ->assertSee(route('docs.project-setup-v1'))
             ->assertDontSee('github.com/jacovanc/Orc/blob', false)
+            ->assertDontSee('already-installed', false)
+            ->assertDontSee('must already be active', false)
             ->assertSee('no ID, webhook URL, or signing secret needs to be copied by hand')
             ->assertSee('dedicated owner of the connection webhook')
             ->assertSee('Ordinary idle Orb sleep is expected')
