@@ -7,6 +7,10 @@
         $ampEnabled = (bool) config('services.amp.enabled');
         $activeLaunch = $active?->ampLaunch;
         $activeMode = $active?->stage?->config['agent_mode'] ?? null;
+        $awaitingController = $ampEnabled
+            && $active?->stage?->type === \App\Domain\Workflow\StageType::Agent
+            && $activeLaunch?->launch_status === \App\Domain\Workflow\AmpLaunchStatus::Pending
+            && ! $active?->amp_thread_id;
         $boundPublication = $active
             ? $run->stageRuns
                 ->where('attempt_number', '<', $active->attempt_number)
@@ -85,7 +89,12 @@
                     <p class="mt-3 text-sm leading-6 text-zinc-400">
                         @if ($active->stage->type === \App\Domain\Workflow\StageType::Agent)
                             @if ($ampEnabled)
-                                @if ($activeMode === 'real_development')
+                                @if ($awaitingController)
+                                    Orc activated this stage and queued its command, but no agent thread or Orb is running until the dedicated controller acknowledges the launch.
+                                    @if ($activeMode !== 'real_development' && $activeMode !== 'real_qa')
+                                        If acknowledged, this remains integration proof only—not code validation or approval.
+                                    @endif
+                                @elseif ($activeMode === 'real_development')
                                     A fresh private Amp thread and Orb is implementing the bound issue with normal Amp tools and your existing native repository access. Orc never provisions or copies GitHub credentials.
                                 @elseif ($activeMode === 'real_qa')
                                     A fresh private Amp thread and Orb is independently inspecting and testing the exact bound pull request. QA may not change implementation, push, merge, or grant human approval.
@@ -96,11 +105,11 @@
                                 Amp execution is disabled. Use the explicit simulation control to test orchestration locally.
                             @endif
                         @else
-                            Choose a permitted review outcome. Publish change feedback on GitHub before linking it here.
+                            Review the issue and pull request on GitHub, then choose a permitted outcome here. Orc does not require or store a feedback link or confirmation.
                         @endif
                     </p>
                     <div class="mt-6 flex items-center gap-2">
-                        <span class="status-pill status-{{ $active->status->value }}">{{ $active->status->value }}</span>
+                        <span class="status-pill status-{{ $awaitingController ? 'pending' : $active->status->value }}">{{ $awaitingController ? 'waiting for controller' : $active->status->value }}</span>
                         <span class="font-mono text-[10px] uppercase tracking-wider text-zinc-600">{{ $active->stage->type->value }} stage</span>
                         @if ($activeMode === 'real_development')
                             <span class="rounded-full border border-sky-300/20 bg-sky-300/[0.08] px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-sky-200">Real Development</span>
@@ -119,7 +128,7 @@
                                 <div class="flex flex-wrap items-start justify-between gap-4">
                                     <div>
                                         <p class="field-label mb-1">Amp dispatch</p>
-                                        <p class="text-xs leading-5 text-zinc-600">Stable launch key <span class="font-mono text-zinc-500">{{ $activeLaunch?->idempotency_key ? str($activeLaunch->idempotency_key)->limit(18) : 'preparing' }}</span></p>
+                                        <p class="text-xs leading-5 text-zinc-600">Durable launch command {{ $activeLaunch ? '#'.$activeLaunch->id : 'preparing' }}</p>
                                     </div>
                                     <div class="flex flex-wrap gap-2">
                                         <span class="status-pill status-{{ $activeLaunch?->delivery_status?->value ?? 'waiting' }}">Delivery {{ $activeLaunch?->delivery_status?->value ?? 'preparing' }}</span>
@@ -132,6 +141,11 @@
                                     </a>
                                 @else
                                     <p class="mt-5 text-xs text-zinc-500">The thread link will appear after Amp acknowledges the launch.</p>
+                                @endif
+                                @if ($activeLaunch?->delivery_status === \App\Domain\Workflow\AmpDeliveryStatus::Delivered && $activeLaunch?->launch_status === \App\Domain\Workflow\AmpLaunchStatus::Pending)
+                                    <div class="mt-5 rounded-xl border border-sky-300/20 bg-sky-300/[0.06] px-4 py-3 text-xs leading-5 text-sky-100/70">
+                                        Amp accepted this event into its queue, but the controller has not acknowledged it. HTTP 202 does not mean an Orb was launched. Check the dedicated controller lifecycle in <a class="text-sky-200 underline decoration-sky-300/30 underline-offset-2" href="{{ route('projects.settings', $run->project) }}">Project settings</a>.
+                                    </div>
                                 @endif
                                 @if ($activeMode === 'real_qa' && $boundPublication?->github_pull_request_url)
                                     <a class="mt-3 inline-flex items-center gap-2 rounded-xl border border-violet-300/20 bg-violet-300/[0.07] px-4 py-3 font-mono text-xs text-violet-200 transition hover:bg-violet-300/[0.12]" href="{{ $boundPublication->github_pull_request_url }}" target="_blank" rel="noopener">
@@ -233,6 +247,11 @@
                         @foreach ($run->stageRuns as $attempt)
                             @php
                                 $reportEvent = $run->events->first(fn ($event) => $event->stage_run_id === $attempt->id && isset($event->metadata['github_report_url']));
+                                $attemptAwaitingController = $ampEnabled
+                                    && $attempt->id === $active?->id
+                                    && $attempt->stage->type === \App\Domain\Workflow\StageType::Agent
+                                    && $attempt->ampLaunch?->launch_status === \App\Domain\Workflow\AmpLaunchStatus::Pending
+                                    && ! $attempt->amp_thread_id;
                             @endphp
                             <tr class="text-sm">
                                 <td class="px-6 py-4 font-mono text-xs text-zinc-500">#{{ str_pad($attempt->attempt_number, 2, '0', STR_PAD_LEFT) }}</td>
@@ -246,7 +265,7 @@
                                         <span class="ml-2 rounded-full border border-amber-300/20 px-2 py-0.5 font-mono text-[8px] uppercase text-amber-200">proof</span>
                                     @endif
                                 </td>
-                                <td class="px-4 py-4"><span class="status-pill status-{{ $attempt->status->value }}">{{ $attempt->status->value }}</span></td>
+                                <td class="px-4 py-4"><span class="status-pill status-{{ $attemptAwaitingController ? 'pending' : $attempt->status->value }}">{{ $attemptAwaitingController ? 'waiting' : $attempt->status->value }}</span></td>
                                 <td class="px-4 py-4 text-zinc-400">{{ $attempt->outcome ? str($attempt->outcome)->replace('_', ' ')->title() : '—' }}</td>
                                 <td class="px-6 py-4 text-right text-xs">
                                     @if ($attempt->amp_thread_id)
@@ -285,7 +304,7 @@
                     <li class="relative border-l border-white/[0.08] pb-6 pl-5 last:border-transparent last:pb-0">
                         <span class="absolute -left-1 top-1 h-2 w-2 rounded-full border-2 border-ink-900 {{ $eventDotClass }}"></span>
                         <div class="flex items-start justify-between gap-3">
-                            <p class="text-sm font-medium text-zinc-300">{{ str($event->type)->replace(['.', '_'], ' ')->title() }}</p>
+                            <p class="text-sm font-medium text-zinc-300">{{ $event->type === 'stage.started' ? 'Stage Activated' : str($event->type)->replace(['.', '_'], ' ')->title() }}</p>
                             <time class="shrink-0 font-mono text-[9px] text-zinc-700">{{ $event->happened_at->format('H:i:s') }}</time>
                         </div>
                         @if ($event->metadata)

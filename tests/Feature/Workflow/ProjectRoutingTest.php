@@ -198,7 +198,11 @@ class ProjectRoutingTest extends TestCase
         Queue::assertPushed(VerifyAmpProjectConnection::class, 1);
         $token = $connection->verification_secret;
         $thread = 'T-'.str_repeat('1', 36);
-        $base = ['amp_project_id' => 'amp-project-one', 'github_repository' => 'acme/widgets'];
+        $base = [
+            'amp_project_id' => 'amp-project-one',
+            'github_repository' => 'acme/widgets',
+            'controller_thread_id' => 'T-controller-owner',
+        ];
 
         $claim = $service->handleVerification($token, [...$base, 'action' => 'claim']);
         $duplicateClaim = $service->handleVerification($token, [...$base, 'action' => 'claim']);
@@ -211,6 +215,8 @@ class ProjectRoutingTest extends TestCase
         $this->assertSame('verified', $completed['disposition']);
         $this->assertSame('already_verified', $duplicateComplete['disposition']);
         $this->assertTrue($connection->fresh()->isReady());
+        $this->assertSame('T-controller-owner', $connection->fresh()->controller_thread_id);
+        $this->assertNotNull($connection->fresh()->controller_last_acknowledged_at);
     }
 
     public function test_claimed_verification_failure_is_recorded_and_idempotent_without_retrying_an_orb(): void
@@ -231,6 +237,7 @@ class ProjectRoutingTest extends TestCase
         $base = [
             'amp_project_id' => 'amp-project-one',
             'github_repository' => 'acme/widgets',
+            'controller_thread_id' => 'T-controller-owner',
             'failure_code' => 'controller_thread_failed',
         ];
 

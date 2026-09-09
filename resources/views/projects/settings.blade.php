@@ -19,6 +19,12 @@
                 <div><dt class="field-label">Amp project identity</dt><dd class="font-mono text-sm text-zinc-300">{{ $connection?->amp_project_id ?? $project->amp_project_id ?? 'Discovered when setup is claimed' }}</dd></div>
                 <div><dt class="field-label">Connection ID</dt><dd class="break-all font-mono text-sm text-zinc-300">{{ $connection?->public_id ?? 'Not configured' }}</dd></div>
                 <div><dt class="field-label">Version</dt><dd class="text-sm text-zinc-300">{{ $connection ? 'v'.$connection->version : '—' }}</dd></div>
+                <div><dt class="field-label">Last verification</dt><dd class="text-sm text-zinc-300">{{ $connection?->verified_at?->diffForHumans() ?? 'Not verified' }}</dd></div>
+                @if ($connection?->controller_thread_id)
+                    <div class="sm:col-span-2"><dt class="field-label">Dedicated controller thread</dt><dd><a class="font-mono text-sm text-orange-300" target="_blank" rel="noopener" href="https://ampcode.com/threads/{{ $connection->controller_thread_id }}">{{ $connection->controller_thread_id }} ↗</a><span class="ml-3 text-xs text-zinc-600">Last acknowledged {{ $connection->controller_last_acknowledged_at?->diffForHumans() ?? 'not yet' }}</span></dd></div>
+                @else
+                    <div class="sm:col-span-2"><dt class="field-label">Dedicated controller thread</dt><dd class="text-sm text-zinc-500">Awaiting an actual webhook-handler acknowledgement. A queued HTTP 202 does not identify or verify the owner.</dd></div>
+                @endif
                 @if ($connection?->verification_thread_id)<div class="sm:col-span-2"><dt class="field-label">Verification thread</dt><dd><a class="font-mono text-sm text-orange-300" target="_blank" rel="noopener" href="https://ampcode.com/threads/{{ $connection->verification_thread_id }}">{{ $connection->verification_thread_id }} ↗</a></dd></div>@endif
             </dl>
             @if ($connection?->last_error_message)<p class="mt-5 rounded-xl border border-red-400/15 bg-red-400/[0.05] p-4 text-xs text-red-100/70">{{ $connection->last_error_message }}</p>@endif
@@ -59,6 +65,10 @@
 
         <section class="mt-8 rounded-2xl border border-sky-300/15 bg-sky-300/[0.04] p-6 text-sm leading-6 text-sky-100/70">
             <strong class="text-sky-100">Placement matters.</strong> Install/reload the controller from inside the chosen Amp project; <code>createThread</code> has no project selector. The first setup claim binds that actual Amp project identity, and verification accepts only a fresh Orb reporting the same identity and native read access to <code>{{ $project->github_repository }}</code>. Orc does not copy or repair GitHub credentials.
+        </section>
+
+        <section class="mt-6 rounded-2xl border border-amber-300/15 bg-amber-300/[0.04] p-6 text-sm leading-6 text-amber-100/70">
+            <strong class="text-amber-100">Controller lifecycle.</strong> Keep the dedicated controller thread above unarchived. Normal idle Orb sleep is safe—an incoming event wakes it, so no keep-alive or polling is needed. If the webhook becomes unavailable, the cause is not knowable from HTTP 404 alone: open and restore the owning thread if archived, resume the trigger in Amp settings if it was separately paused, then click <em>Verify in fresh Orb</em>. If recovery fails, generate a new immutable connection version. Existing runs remain bound to their original version and never move silently.
         </section>
     </div>
 </x-app-layout>

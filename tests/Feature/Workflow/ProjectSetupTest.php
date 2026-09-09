@@ -5,10 +5,12 @@ namespace Tests\Feature\Workflow;
 use App\Jobs\VerifyAmpProjectConnection;
 use App\Models\Project;
 use App\Models\User;
+use App\Services\AmpConnectionUrlGuard;
 use App\Services\AmpProjectConnectionService;
 use App\Services\AmpSignature;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -77,6 +79,8 @@ class ProjectSetupTest extends TestCase
             ->assertSee(route('docs.project-setup-v1'))
             ->assertDontSee('github.com/jacovanc/Orc/blob', false)
             ->assertSee('no ID, webhook URL, or signing secret needs to be copied by hand')
+            ->assertSee('dedicated owner of the connection webhook')
+            ->assertSee('Ordinary idle Orb sleep is expected')
             ->assertDontSee('launch_signing_secret', false)
             ->assertDontSee('github_feedback_confirmed', false);
     }
@@ -161,6 +165,68 @@ class ProjectSetupTest extends TestCase
         $this->assertSame('completed', $setup->fresh()->status);
         $this->assertSame('verifying', $project->currentConnection->fresh()->status);
         Queue::assertPushed(VerifyAmpProjectConnection::class, 1);
+
+        $this->withToken($project->currentConnection->fresh()->verification_secret)
+            ->postJson('/api/integrations/amp/connection-verification', [
+                'schema_version' => 1,
+                'event_id' => (string) Str::uuid(),
+                'action' => 'claim',
+                'controller_thread_id' => $thread,
+                'amp_project_id' => 'amp-project-one',
+                'github_repository' => 'acme/widgets',
+            ])->assertOk()->assertJsonPath('disposition', 'claimed');
+        $this->assertSame($thread, $project->currentConnection->fresh()->controller_thread_id);
+        $this->assertNotNull($project->currentConnection->fresh()->controller_last_acknowledged_at);
+    }
+
+    public function test_setup_verification_rejects_an_unresolved_or_different_webhook_owner(): void
+    {
+        ['project' => $project, 'setup' => $setup] = $this->pendingSetup();
+        $setupThread = 'T-'.str_repeat('5', 36);
+        $claim = $this->withToken($setup->token)->postJson('/api/integrations/amp/project-setup', [
+            'schema_version' => 1,
+            'action' => 'claim',
+            'setup_id' => $setup->public_id,
+            'thread_id' => $setupThread,
+            'amp_project_id' => 'amp-project-one',
+        ])->assertOk();
+        $this->withToken($setup->token)->postJson('/api/integrations/amp/project-setup', [
+            'schema_version' => 1,
+            'action' => 'complete',
+            'setup_id' => $setup->public_id,
+            'thread_id' => $setupThread,
+            'amp_project_id' => 'amp-project-one',
+            'launch_webhook_url' => 'https://hooks.ampcode.com/project-controller-owner-test',
+            'controller_source_sha256' => $claim->json('controller_source_sha256'),
+        ])->assertOk();
+        $connection = $project->currentConnection->fresh();
+
+        $this->withToken($connection->verification_secret)
+            ->postJson('/api/integrations/amp/connection-verification', [
+                'schema_version' => 1,
+                'event_id' => (string) Str::uuid(),
+                'action' => 'claim',
+                'amp_project_id' => 'amp-project-one',
+                'github_repository' => 'acme/widgets',
+            ])->assertUnprocessable();
+        $this->assertNull($connection->fresh()->controller_thread_id);
+
+        $actualOwner = 'T-'.str_repeat('6', 36);
+        $this->withToken($connection->verification_secret)
+            ->postJson('/api/integrations/amp/connection-verification', [
+                'schema_version' => 1,
+                'event_id' => (string) Str::uuid(),
+                'action' => 'claim',
+                'controller_thread_id' => $actualOwner,
+                'amp_project_id' => 'amp-project-one',
+                'github_repository' => 'acme/widgets',
+            ])->assertStatus(202)->assertJsonPath('disposition', 'controller_owner_mismatch');
+
+        $connection->refresh();
+        $this->assertSame('failed', $connection->status);
+        $this->assertSame('controller_owner_mismatch', $connection->last_error_code);
+        $this->assertSame($actualOwner, $connection->controller_thread_id);
+        $this->assertNull($connection->verification_claimed_at);
     }
 
     public function test_completed_controller_securely_refreshes_a_rotated_webhook_idempotently(): void
@@ -238,6 +304,38 @@ class ProjectSetupTest extends TestCase
 
         $this->assertSame('https://hooks.ampcode.com/original', $connection->fresh()->launch_webhook_url);
         $this->assertDatabaseCount('amp_integration_events', 0);
+    }
+
+    public function test_verification_202_waits_for_owner_ack_and_404_is_unknown_infrastructure_failure(): void
+    {
+        ['project' => $project, 'connection' => $connection] = $this->pendingSetup();
+        $connection->update(['launch_webhook_url' => 'https://hooks.ampcode.com/controller-lifecycle']);
+        $connection = app(AmpProjectConnectionService::class)->beginVerification(
+            $project,
+            $connection,
+            $this->owner,
+        );
+
+        Http::fakeSequence()->push('', 202)->push('', 404);
+        (new VerifyAmpProjectConnection($connection->id))->handle(
+            app(AmpSignature::class),
+            app(AmpConnectionUrlGuard::class),
+            app(AmpProjectConnectionService::class),
+        );
+        $connection->refresh();
+        $this->assertSame('verifying', $connection->status);
+        $this->assertNull($connection->controller_thread_id);
+        $this->assertNull($connection->verification_thread_id);
+
+        (new VerifyAmpProjectConnection($connection->id))->handle(
+            app(AmpSignature::class),
+            app(AmpConnectionUrlGuard::class),
+            app(AmpProjectConnectionService::class),
+        );
+        $connection->refresh();
+        $this->assertSame('failed', $connection->status);
+        $this->assertSame('webhook_unavailable', $connection->last_error_code);
+        $this->assertStringContainsString('cause is unknown', $connection->last_error_message);
     }
 
     public function test_wrong_project_expiry_replay_and_reissue_fail_closed(): void
@@ -347,8 +445,18 @@ class ProjectSetupTest extends TestCase
             ->assertOk()->assertSee('failed')->assertSee('Harmless verification failed.');
 
         $project->currentConnection->update(['status' => 'verified', 'verified_at' => now(), 'last_error_message' => null]);
+        $project->currentConnection->update([
+            'controller_thread_id' => 'T-controller-owner',
+            'controller_last_acknowledged_at' => now(),
+        ]);
         $this->actingAs($this->owner)->get(route('projects.settings', $project))
-            ->assertOk()->assertSee('verified')->assertSee('Generate new setup prompt');
+            ->assertOk()
+            ->assertSee('verified')
+            ->assertSee('Generate new setup prompt')
+            ->assertSee('Dedicated controller thread')
+            ->assertSee('https://ampcode.com/threads/T-controller-owner', false)
+            ->assertSee('Normal idle Orb sleep is safe')
+            ->assertSee('cause is not knowable from HTTP 404 alone');
     }
 
     private function pendingSetup(): array

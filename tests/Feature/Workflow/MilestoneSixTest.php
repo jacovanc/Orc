@@ -293,6 +293,8 @@ class MilestoneSixTest extends TestCase
     public function test_real_and_proof_modes_and_pull_request_links_render_clearly(): void
     {
         $run = $this->startRun();
+        $this->claimAndAcknowledge($run->activeStageRun->ampLaunch, $this->threadId(31));
+        $run->refresh()->load(['currentStage', 'activeStageRun.ampLaunch', 'stageRuns.ampLaunch']);
         $this->actingAs($this->user)->get(route('workflows.show', $run))
             ->assertOk()
             ->assertSee('Real Development')

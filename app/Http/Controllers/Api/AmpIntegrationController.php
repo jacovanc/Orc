@@ -49,6 +49,7 @@ class AmpIntegrationController extends Controller
             'reason' => ['nullable', 'string', 'max:500'],
             'amp_project_id' => ['required', 'string', 'max:100'],
             'connection_id' => ['required', 'uuid'],
+            'controller_thread_id' => ['nullable', 'string', 'regex:/^T-[A-Za-z0-9-]+$/'],
         ]);
 
         if ($payload['event_id'] !== $request->attributes->get('amp_event_id')) {
@@ -56,6 +57,14 @@ class AmpIntegrationController extends Controller
         }
 
         try {
+            if (isset($payload['controller_thread_id'])) {
+                $this->connections->acknowledgeController(
+                    $ampProjectConnection,
+                    $payload['controller_thread_id'],
+                    $payload['amp_project_id'],
+                    $payload['connection_id'],
+                );
+            }
             $result = $this->engine->handleAmpCallback(
                 $payload,
                 hash('sha256', $request->getContent()),
@@ -183,6 +192,7 @@ class AmpIntegrationController extends Controller
             'thread_id' => ['nullable', 'string', 'regex:/^T-[A-Za-z0-9-]+$/'],
             'amp_project_id' => ['required', 'string', 'max:100'],
             'github_repository' => ['required', 'string', 'regex:/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/'],
+            'controller_thread_id' => ['nullable', 'required_if:action,claim', 'string', 'regex:/^T-[A-Za-z0-9-]+$/'],
             'native_github_access' => ['nullable', 'required_if:action,complete', 'boolean'],
             'failure_code' => ['nullable', 'required_if:action,failed', Rule::in(['controller_thread_failed'])],
         ]);

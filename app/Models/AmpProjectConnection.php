@@ -14,6 +14,8 @@ class AmpProjectConnection extends Model
         'version',
         'amp_project_id',
         'controller_key',
+        'controller_thread_id',
+        'controller_last_acknowledged_at',
         'launch_webhook_url',
         'launch_signing_secret',
         'callback_signing_secret',
@@ -47,6 +49,7 @@ class AmpProjectConnection extends Model
             'callback_signing_secret' => 'encrypted',
             'verification_secret' => 'encrypted',
             'verification_payload' => 'encrypted',
+            'controller_last_acknowledged_at' => 'datetime',
             'verification_claimed_at' => 'datetime',
             'verified_at' => 'datetime',
         ];

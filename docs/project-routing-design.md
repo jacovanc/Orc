@@ -1,6 +1,6 @@
 # Project management and Amp routing design
 
-Status: designed before coding and implemented on 2026-09-08. This phase follows the live-proven Milestone 7 workflow and does not change workflow definition v1–v3.
+Status: designed before coding and implemented on 2026-09-08, with explicit controller-owner lifecycle verification added on 2026-09-09. This phase follows the live-proven Milestone 7 workflow and does not change workflow definition v1–v3.
 
 ## Domain
 
@@ -19,7 +19,9 @@ Amp's installed Plugin API exposes no `project` selector on `Agent.createThread`
 
 The controller compares the connection ID and expected project ID in the signed launch with its owner-only runtime configuration and with the runtime's actual `AMP_PROJECT_ID`. Every worker tool call also carries the child's actual `AMP_PROJECT_ID`, added by worker code rather than model input, and Laravel requires it to match the run's bound connection.
 
-Before a connection becomes ready, Laravel sends a signed, idempotent verification command to its webhook. The matching controller claims the verification, checks its actual project ID, creates a harmless fresh Orb, and prompts the globally installed worker's narrow verification tool. That tool reports the child thread ID, actual project ID, and a read-only native-`gh` access check for the canonical repository. Laravel marks the connection verified only when all identifiers and repository access match. A successful fetch in an unrelated project is not accepted as routing evidence.
+Before a connection becomes ready, Laravel sends a signed, idempotent verification command to its webhook. HTTP 202 means queued, not handled or launched. The matching handler reports its actual owning thread from Amp's handler context; Laravel requires it to equal the setup thread, records its link/last acknowledgement, checks the actual project ID, then permits one harmless fresh Orb. The worker reports the child thread ID, actual project ID, and a read-only native-`gh` access check for the canonical repository. Laravel marks the connection verified only when owner, placement, identifiers, and repository access all match. A successful fetch in an unrelated project is not accepted as routing evidence.
+
+Amp keeps the first thread that registered a user/project/plugin/key as owner. Loading elsewhere neither transfers ownership nor revives an archived owner, and registration metadata exposes no owner ID. A unique connection key plus handler-context acknowledgement prevents Orc from guessing. Normal idle sleep is safe and requires no keep-alive. Settings link the dedicated owner and explain restore/reverify or immutable replacement recovery without silently moving existing runs.
 
 ## Trust and security boundaries
 

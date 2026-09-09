@@ -242,6 +242,8 @@ class MilestoneSevenTest extends TestCase
     public function test_running_blocked_remediation_and_human_qa_states_render_truthfully(): void
     {
         $runningQa = $this->completeDevelopmentSuccess($this->startRun(), 1, 701);
+        $this->claimAndAcknowledge($runningQa->activeStageRun->ampLaunch, $this->threadId(2));
+        $runningQa->refresh()->load(['currentStage', 'activeStageRun.ampLaunch', 'stageRuns.ampLaunch']);
         $this->actingAs($this->user)->get(route('workflows.show', $runningQa))
             ->assertOk()
             ->assertSee('Independent QA')

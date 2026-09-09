@@ -78,6 +78,13 @@ class VerifyAmpProjectConnection implements ShouldBeUnique, ShouldQueue
         if ($response->successful()) {
             return;
         }
+        if (in_array($response->status(), [404, 410], true)) {
+            if (! $service->markWebhookUnavailable($connection, (string) $connection->launch_webhook_url)) {
+                throw new RuntimeException('Retrying verification against the refreshed Amp controller webhook.');
+            }
+
+            return;
+        }
         if ($response->status() === 408 || $response->status() === 429 || $response->serverError()) {
             throw new RuntimeException('Retryable Amp connection verification response.');
         }

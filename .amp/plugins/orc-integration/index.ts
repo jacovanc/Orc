@@ -51,6 +51,7 @@ type LaunchPayload = {
 	prior_pull_request_number?: number
 	prior_pull_request_url?: string
 	allowed_outcomes: string[]
+	controller_thread_id?: string
 	thread_id?: string
 	report_url?: string
 	prompt_appended?: boolean
@@ -227,7 +228,7 @@ async function handleLaunch(
 	verifyLaunchSignature(body, eventId, timestamp, signature, config.launchSigningSecret)
 	const envelope = parseEnvelope(body)
 	if (envelope.command === 'verify_connection') {
-		await handleConnectionVerification(envelope, config, verificationAgent, ctx.signal)
+		await handleConnectionVerification(envelope, config, verificationAgent, ctx.thread.id, ctx.signal)
 		return
 	}
 	assertControllerBinding(envelope, config)
@@ -246,6 +247,7 @@ async function handleLaunch(
 	}
 
 	const payload = parseLaunch(body)
+	payload.controller_thread_id = ctx.thread.id
 	if (payload.event_id !== eventId) throw new PermanentWebhookInputError('Signed launch event ID does not match the body.')
 	const reconciliationSuffix = idempotencyKey.startsWith(`${payload.idempotency_key}:reconcile:`)
 		? idempotencyKey.slice(`${payload.idempotency_key}:reconcile:`.length)
@@ -540,6 +542,7 @@ async function callback(
 		stage_run_id: context.stage_run_id,
 		connection_id: context.connection_id,
 		amp_project_id: actualAmpProjectId(),
+		controller_thread_id: context.controller_thread_id,
 		...extra,
 	}
 	const url = `${context.callback_url.replace(/\/$/, '')}/callback`
@@ -667,6 +670,7 @@ async function handleConnectionVerification(
 	envelope: Record<string, unknown>,
 	config: RuntimeConfig,
 	verificationAgent: ReturnType<PluginAPI['createAgent']>,
+	controllerThreadId: string,
 	signal?: AbortSignal,
 ) {
 	assertControllerBinding(envelope, config)
@@ -684,6 +688,7 @@ async function handleConnectionVerification(
 		event_id: randomUUID(),
 		amp_project_id: actualAmpProjectId(),
 		github_repository: envelope.github_repository,
+		controller_thread_id: controllerThreadId,
 	}
 	const claim = await bearerPost(String(envelope.verification_url), String(envelope.verification_token), {
 		...base,

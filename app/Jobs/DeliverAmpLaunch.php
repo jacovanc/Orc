@@ -155,7 +155,7 @@ class DeliverAmpLaunch implements ShouldBeUnique, ShouldQueue
             $engine->failAmpLaunchDelivery(
                 $launch,
                 'http_'.$response->status(),
-                'The bound Amp controller webhook is unavailable. Pair a new connection from Project settings before starting another workflow.',
+                'The bound Amp controller webhook is unavailable; the cause is unknown. No Orb was launched. Restore the shown controller thread if archived and resume its trigger if separately paused, then reverify that exact connection. A replacement connection will not move this historical run.',
                 $response->status(),
             );
 

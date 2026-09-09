@@ -130,8 +130,37 @@ class AmpIntegrationTest extends TestCase
             $requests[1]->header('Idempotency-Key')[0],
         );
         $this->assertSame(AmpDeliveryStatus::Delivered, $launch->fresh()->delivery_status);
+        $this->assertSame(AmpLaunchStatus::Pending, $launch->fresh()->launch_status);
         $this->assertSame(2, $launch->fresh()->delivery_attempts);
         $this->assertSame(hash('sha256', $requests[0]->body()), $launch->fresh()->payload_hash);
+        $this->actingAs($this->user)
+            ->get(route('workflows.show', $launch->stageRun->workflowRun))
+            ->assertOk()
+            ->assertSee('HTTP 202 does not mean an Orb was launched')
+            ->assertSee('no agent thread or Orb is running')
+            ->assertSee('waiting for controller')
+            ->assertSee('Stage Activated');
+    }
+
+    public function test_signed_controller_callback_records_actual_owner_and_rejects_owner_change(): void
+    {
+        $run = $this->startRun();
+        $launch = $run->activeStageRun->ampLaunch;
+        $owner = 'T-'.str_repeat('7', 36);
+        $this->postRawCallback($this->payload($launch, 'launch.claim', [
+            'controller_thread_id' => $owner,
+        ]))->assertOk();
+
+        $connection = $launch->ampProjectConnection->fresh();
+        $this->assertSame($owner, $connection->controller_thread_id);
+        $this->assertNotNull($connection->controller_last_acknowledged_at);
+
+        $this->postRawCallback($this->payload($launch, 'launch.acknowledged', [
+            'controller_thread_id' => 'T-'.str_repeat('8', 36),
+            'thread_id' => $this->threadId(1),
+        ]))->assertConflict();
+        $this->assertNull($launch->stageRun->fresh()->amp_thread_id);
+        $this->assertSame($owner, $connection->fresh()->controller_thread_id);
     }
 
     public function test_retry_after_a_persisted_claim_replays_the_same_launch_instead_of_silently_stopping(): void
@@ -505,7 +534,8 @@ class AmpIntegrationTest extends TestCase
         $this->assertSame(WorkflowStatus::Failed, $failedRun->fresh()->status);
         $this->assertSame('failed', $failedLaunch->ampProjectConnection->fresh()->status);
         $this->assertSame('webhook_unavailable', $failedLaunch->ampProjectConnection->fresh()->last_error_code);
-        $this->assertStringContainsString('Pair a new connection', $failedLaunch->fresh()->last_error_message);
+        $this->assertStringContainsString('cause is unknown', $failedLaunch->fresh()->last_error_message);
+        $this->assertStringContainsString('No Orb was launched', $failedLaunch->fresh()->last_error_message);
 
         $failedLaunch->ampProjectConnection->update([
             'status' => 'verified',

@@ -45,6 +45,8 @@ There is deliberately no GitHub credential in this file and no controller secret
 
 Amp's Plugin API currently requires one manual **plugins: reload** after first installation; it exposes no supported programmatic reload. Registration key v11 is scoped to the immutable connection identity because Amp shares a key's durable webhook registration across project threads; a replacement connection therefore cannot inherit an older thread's handler. Permanently invalid, expired, or incorrectly bound requests are acknowledged without processing or logging request data so one poison event cannot block later valid commands; transient controller and network failures continue to retry. Temporary inert v9/v10 handlers drained the known retired queue during migration and were then removed from the controller so future reloads do not recreate those legacy registrations. Amp's installed Plugin API and CLI have no list/delete/revoke webhook operation; an operator may remove obsolete registrations in Amp's UI after confirming no active run is bound to them. The controller writes its current capability URL to `.amp/runtime/launch-webhook-url` with mode `0600`; the setup tool submits it directly to the preallocated connection over HTTPS and queues verification. On every later controller registration the trusted controller also sends the current URL to its connection-bound Laravel endpoint with the callback HMAC, exact Amp project/connection identity, fresh timestamp, and persistently deduplicated event ID. This repairs a rotated capability without exposing broad secrets to a coding Orb. A 404/410 during launch now marks the connection failed and tells the operator to pair a new immutable version instead of leaving a misleading verified connection. No secret is copied through a form.
 
+The webhook registration response contains only its capability URL—no owner metadata. Registration in another project thread returns the same URL without transferring ownership. Orc therefore does not assume the setup caller is the owner: the first signed verification delivery includes the actual `WebhookHandlerContext.thread.id`, which must equal the setup thread before the connection can become verified. Project settings link that dedicated owner and show its last acknowledgement. Keep it unarchived; normal idle sleep is safe because events wake the Orb. If unavailable, restore the owner if archived and resume the trigger if separately paused, then explicitly reverify. HTTP 404 has an unknown cause and is never labelled “archived” as a fact. Orc performs no polling, keep-alive, automatic restore, or trigger-state mutation.
+
 Every custom agent that can create an Orb—including the harmless connection verifier—is registered as an active project agent mode. This is an Amp requirement for custom-agent Orb creation, even when the mode is used only by the controller rather than selected manually.
 
 Configure Laravel without exposing values:
@@ -80,11 +82,12 @@ The capability is model-visible because the agent must supply it to the workflow
 1. Entering an agent stage creates an `AmpLaunch`, connection-version snapshot, per-launch capability, report nonce, encrypted canonical body, and queue job in the same workflow transaction.
 2. Every delivery retry sends the exact stored body, launch event ID, and idempotency key.
 3. The selected project-scoped controller checks its configured connection ID, expected project ID, and actual `AMP_PROJECT_ID`, then requests `launch.claim`. Laravel grants the first current attempt only.
-4. The controller creates one private `executor: "orb"` thread. It never recreates a claimed attempt.
-5. `launch.acknowledged` binds the exact thread. A rejected/stale acknowledgement causes the controller to cancel the unprompted thread.
-6. The controller confirms live context, checks the full transcript for `orc-stage-prompt:<launch-event>`, and appends the prompt only if absent.
-7. Bounded reconciliation deliveries use distinct transport keys but the same canonical launch body. They recover the bound thread's prompt/monitor after controller restart and never call `createThread`.
-8. A claim with no durable thread becomes `ambiguous`; it is never converted into a duplicate Orb.
+4. A queued HTTP 202 changes only delivery state; it never marks the stage launched. The actual webhook handler identifies its owning controller thread in the signed claim.
+5. The controller creates one private `executor: "orb"` thread. It never recreates a claimed attempt.
+6. `launch.acknowledged` binds the exact thread. A rejected/stale acknowledgement causes the controller to cancel the unprompted thread.
+7. The controller confirms live context, checks the full transcript for `orc-stage-prompt:<launch-event>`, and appends the prompt only if absent.
+8. Bounded reconciliation deliveries use distinct transport keys but the same canonical launch body. They recover the bound thread's prompt/monitor after controller restart and never call `createThread`.
+9. A claim with no durable thread becomes `ambiguous`; it is never converted into a duplicate Orb.
 
 Callbacks may arrive before the launch HTTP response. Business and delivery status are separate, so the later response cannot regress a claimed/launched/completed attempt.
 

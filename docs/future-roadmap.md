@@ -3,8 +3,8 @@
 ## Required order
 
 1. **Milestone 7 — independent substantive QA:** implemented and live-proven.
-2. **Projects and Amp project routing:** current implementation phase.
-3. **Remaining hardening:** operational recovery, observability, backup/restore exercises, and security review.
+2. **Projects and Amp project routing:** implemented, including agent-assisted no-ID setup and explicit webhook-owner lifecycle verification/recovery guidance.
+3. **Remaining hardening:** deeper observability, backup/restore exercises, and security review.
 4. **Configurable workflow editor:** new immutable definition versions with validation and preview.
 5. **Incremental onboarding:** setup protocol v1 now provides a short-lived agent-assisted connection prompt; broader account/project discovery remains deferred.
 

@@ -88,6 +88,7 @@ class AmpProjectConnectionService
             '',
             'This is Orc setup protocol v1. Public authoritative runbook: '.route('docs.project-setup-v1'),
             'If the tool reports that Amp must reload plugins, ask me to run “plugins: reload” once, then call `orc_setup_project` again with the same fields. Do not claim setup or verification succeeded until the tool confirms it.',
+            'This setup thread becomes the dedicated owner of the connection webhook. Keep it unarchived while Orc uses this connection. Ordinary idle Orb sleep is expected and incoming events wake it; do not add polling or keep-alive work.',
         ]);
     }
 
@@ -274,7 +275,7 @@ class AmpProjectConnectionService
             $locked->forceFill([
                 'status' => 'failed',
                 'last_error_code' => 'webhook_unavailable',
-                'last_error_message' => 'The Amp controller webhook is unavailable. Generate a new setup prompt from Project settings and pair it in the same Amp project.',
+                'last_error_message' => 'The Amp controller webhook is unavailable; the cause is unknown. Open the shown controller thread and restore it if archived, resume the trigger if it was separately paused, then reverify. If the owner is unknown or recovery fails, generate and pair a new immutable connection version.',
             ])->save();
 
             return true;
@@ -393,6 +394,16 @@ class AmpProjectConnectionService
                 throw new WorkflowConflict('The reported Amp project or GitHub repository does not match this connection.');
             }
 
+            if ($payload['action'] === 'claim') {
+                $ownerFailure = $this->bindVerifiedControllerOwner(
+                    $connection,
+                    $payload['controller_thread_id'] ?? null,
+                );
+                if ($ownerFailure !== null) {
+                    return $ownerFailure;
+                }
+            }
+
             return match ($payload['action']) {
                 'claim' => $this->claimVerification($connection),
                 'started' => $this->startVerification($connection, $payload['thread_id'] ?? null),
@@ -407,6 +418,30 @@ class AmpProjectConnectionService
                     $payload['failure_code'],
                 ),
             };
+        }, 3);
+    }
+
+    public function acknowledgeController(
+        AmpProjectConnection $connection,
+        string $controllerThreadId,
+        string $ampProjectId,
+        string $connectionPublicId,
+    ): void {
+        DB::transaction(function () use ($connection, $controllerThreadId, $ampProjectId, $connectionPublicId) {
+            $locked = AmpProjectConnection::query()->lockForUpdate()->findOrFail($connection->id);
+            if ($locked->public_id !== $connectionPublicId || $locked->amp_project_id !== $ampProjectId) {
+                throw new WorkflowConflict('This callback belongs to a different Amp project connection.');
+            }
+            if (! preg_match('/^T-[A-Za-z0-9-]+$/', $controllerThreadId)) {
+                throw new WorkflowConflict('The controller webhook owner thread is invalid.');
+            }
+            if ($locked->controller_thread_id && $locked->controller_thread_id !== $controllerThreadId) {
+                throw new WorkflowConflict('This callback came from a different controller webhook owner thread.');
+            }
+            $locked->forceFill([
+                'controller_thread_id' => $controllerThreadId,
+                'controller_last_acknowledged_at' => now(),
+            ])->save();
         }, 3);
     }
 
@@ -433,6 +468,44 @@ class AmpProjectConnectionService
         $connection->forceFill(['verification_claimed_at' => now()])->save();
 
         return ['accepted' => true, 'launch' => true, 'disposition' => 'claimed'];
+    }
+
+    private function bindVerifiedControllerOwner(AmpProjectConnection $connection, ?string $controllerThreadId): ?array
+    {
+        if (! $controllerThreadId || ! preg_match('/^T-[A-Za-z0-9-]+$/', $controllerThreadId)) {
+            $this->markFailed(
+                $connection,
+                'controller_owner_unresolved',
+                'Amp queued the verification request, but the controller did not identify its actual webhook-owning thread. Reload the current controller, then reverify; do not treat HTTP 202 as a successful launch.',
+            );
+
+            return ['accepted' => false, 'disposition' => 'controller_owner_unresolved'];
+        }
+
+        $expectedThreadId = $connection->setups()
+            ->where('status', 'completed')
+            ->latest('id')
+            ->value('claimed_thread_id');
+        if (
+            ($connection->controller_thread_id && $connection->controller_thread_id !== $controllerThreadId)
+            || ($expectedThreadId && $expectedThreadId !== $controllerThreadId)
+        ) {
+            $connection->forceFill(['controller_thread_id' => $controllerThreadId])->save();
+            $this->markFailed(
+                $connection,
+                'controller_owner_mismatch',
+                'Amp delivered verification to a different webhook-owning thread than this setup thread. Open the shown controller thread and remove the stale trigger, or generate a new connection version and pair it from one dedicated unarchived thread.',
+            );
+
+            return ['accepted' => false, 'disposition' => 'controller_owner_mismatch'];
+        }
+
+        $connection->forceFill([
+            'controller_thread_id' => $controllerThreadId,
+            'controller_last_acknowledged_at' => now(),
+        ])->save();
+
+        return null;
     }
 
     private function startVerification(AmpProjectConnection $connection, ?string $threadId): array

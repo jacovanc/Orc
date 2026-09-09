@@ -272,9 +272,11 @@ describe('Orc controller agent configuration', () => {
 		expect(harness.webhookKey()).toBe('orc-stage-launch-v11-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
 		expect(harness.webhookKeys()).toEqual(['orc-stage-launch-v11-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'])
 		const callbackTypes: string[] = []
+		const controllerThreads: unknown[] = []
 		globalThis.fetch = (async (_input, init) => {
 			const payload = JSON.parse(String(init?.body))
 			callbackTypes.push(payload.type)
+			controllerThreads.push(payload.controller_thread_id)
 			if (payload.type === 'launch.claim') {
 				return Response.json({ accepted: true, launch: false, is_active: true })
 			}
@@ -284,6 +286,7 @@ describe('Orc controller agent configuration', () => {
 		await harness.invoke(launch())
 
 		expect(callbackTypes).toEqual(['launch.claim', 'launch.ambiguous'])
+		expect(controllerThreads).toEqual(['T-controller', 'T-controller'])
 		expect(harness.counts()).toEqual({ createThreadCalls: 0, cancelled: 0, prompted: 0 })
 		rmSync(harness.root, { recursive: true, force: true })
 	})
@@ -309,9 +312,11 @@ describe('Orc controller agent configuration', () => {
 		const harness = await controllerHarness('verification-thread-failed')
 		harness.failCreateThread(new Error('provider unavailable'))
 		const actions: string[] = []
+		const controllerThreads: unknown[] = []
 		globalThis.fetch = (async (_input, init) => {
 			const payload = JSON.parse(String(init?.body))
 			actions.push(payload.action)
+			controllerThreads.push(payload.controller_thread_id)
 			if (payload.action === 'claim') return Response.json({ accepted: true, launch: true })
 			if (payload.action === 'failed') return Response.json({ accepted: true, disposition: 'failed' })
 			throw new Error(`Unexpected verification callback: ${JSON.stringify(payload)}`)
@@ -330,6 +335,7 @@ describe('Orc controller agent configuration', () => {
 		})).rejects.toThrow('provider unavailable')
 
 		expect(actions).toEqual(['claim', 'failed'])
+		expect(controllerThreads).toEqual(['T-controller', 'T-controller'])
 		expect(harness.counts()).toEqual({ createThreadCalls: 1, cancelled: 0, prompted: 0 })
 		expect(harness.createThreadOptions()?.parentThreadID).toBeUndefined()
 		expect(harness.createThreadOptions()?.executor).toBe('orb')
