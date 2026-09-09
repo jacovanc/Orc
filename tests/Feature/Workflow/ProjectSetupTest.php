@@ -28,6 +28,16 @@ class ProjectSetupTest extends TestCase
         Queue::fake();
     }
 
+    public function test_setup_runbook_is_publicly_available_from_the_orc_domain(): void
+    {
+        $this->get(route('docs.project-setup-v1'))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'text/markdown; charset=UTF-8')
+            ->assertHeader('X-Content-Type-Options', 'nosniff')
+            ->assertSeeText('Orc Project setup protocol v1')
+            ->assertSeeText('GitHub access invariant');
+    }
+
     public function test_project_creation_preallocates_connection_and_copyable_setup_prompt(): void
     {
         $response = $this->actingAs($this->owner)->post(route('projects.store'), [
@@ -62,6 +72,8 @@ class ProjectSetupTest extends TestCase
             ->assertSee('Copy setup prompt')
             ->assertSee('orc_setup_project')
             ->assertSee($setup->public_id)
+            ->assertSee(route('docs.project-setup-v1'))
+            ->assertDontSee('github.com/jacovanc/Orc/blob', false)
             ->assertSee('no ID, webhook URL, or signing secret needs to be copied by hand')
             ->assertDontSee('launch_signing_secret', false)
             ->assertDontSee('github_feedback_confirmed', false);

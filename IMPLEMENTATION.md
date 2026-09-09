@@ -60,6 +60,7 @@ Milestones 1–7: authenticated Laravel application, versioned workflow domain, 
 - 2026-09-09: Hardened the active v11 handler against ordered-queue poisoning. Permanently invalid, expired, or incorrectly bound input is acknowledged without processing or logging request details; rejected stale/cancelled claims are terminal; transient callback, network, and Orb failures still retry. Added a controller regression proving malformed input cannot call Laravel or create an Orb.
 - 2026-09-09: A clean post-drain verification reached the connection-scoped v11 controller and exposed Amp's concrete Orb error: custom agents must be registered as an active agent mode. Registered the harmless connection verifier as a project mode and extended the controller-mode regression; its instructions and sole additive workflow tool remain read-only.
 - 2026-09-09: Production Project setup protocol v1 completed end to end. Connection v8 created fresh Orb thread `T-01a0869a-b217-703e-aa61-b767a96e5f9f` in the bound Amp project; its verifier called only `workflow_verify_project_connection`, confirmed native read access to `jacovanc/orc`, changed no files or GitHub/workflow state, and moved the connection to `verified`.
+- 2026-09-09: Removed the setup prompt's dependency on the Orc source repository being public. The versioned authoritative runbook is now served without authentication from the deployed Orc domain at `/docs/project-setup-v1`, and generated prompts reference that URL.
 
 ## Verification
 

@@ -2,6 +2,8 @@
 
 This is the authoritative installation contract for agent-assisted Orc Project pairing.
 
+The deployed application serves this version publicly at `/docs/project-setup-v1`; generated setup prompts use that application-domain URL and do not depend on access to the Orc source repository.
+
 ## Operator flow
 
 1. In Orc, create a Project with a display name and its canonical `owner/repository`. You do not need to find or enter an Amp project ID.

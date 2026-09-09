@@ -9,6 +9,14 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+Route::get('/docs/project-setup-v1', function () {
+    return response((string) file_get_contents(base_path('docs/project-setup-v1.md')), 200, [
+        'Cache-Control' => 'public, max-age=300',
+        'Content-Type' => 'text/markdown; charset=UTF-8',
+        'X-Content-Type-Options' => 'nosniff',
+    ]);
+})->name('docs.project-setup-v1');
+
 Route::get('/dashboard', function () {
     return to_route('workflows.index');
 })->middleware('auth')->name('dashboard');

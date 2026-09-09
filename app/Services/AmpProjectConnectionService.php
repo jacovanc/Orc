@@ -83,7 +83,7 @@ class AmpProjectConnectionService
             'setup_id: '.$setup->public_id,
             'setup_capability: '.$setup->token,
             '',
-            'This is Orc setup protocol v1. Authoritative runbook: https://github.com/jacovanc/Orc/blob/main/docs/project-setup-v1.md',
+            'This is Orc setup protocol v1. Public authoritative runbook: '.route('docs.project-setup-v1'),
             'If the tool reports that Amp must reload plugins, ask me to run “plugins: reload” once, then call `orc_setup_project` again with the same fields. Do not claim setup or verification succeeded until the tool confirms it.',
         ]);
     }
