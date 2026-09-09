@@ -1,6 +1,7 @@
 // @amp-agent-mode {"key":"orc-proof-agent","label":"Orc proof","color":"#f97316"}
 // @amp-agent-mode {"key":"orc-development-agent","label":"Orc development","color":"#38bdf8"}
 // @amp-agent-mode {"key":"orc-qa-agent","label":"Orc independent QA","color":"#a78bfa"}
+// @amp-agent-mode {"key":"orc-connection-verifier","label":"Orc connection check","color":"#22c55e"}
 
 import type {
 	AgentEndEvent,
@@ -153,6 +154,13 @@ export default function (amp: PluginAPI) {
 		description: 'Substantive QA in a fresh Orb using normal Amp tools and native user-configured repository access',
 		color: '#a78bfa',
 		agent: qaAgent.definition,
+	})
+	amp.registerAgentMode({
+		key: 'orc-connection-verifier',
+		label: 'Orc connection check',
+		description: 'Harmless fresh-Orb placement and native repository access verification',
+		color: '#22c55e',
+		agent: verificationAgent.definition,
 	})
 
 	amp.on('agent.end', async (event) => agentEndSafetyNet(event, config))

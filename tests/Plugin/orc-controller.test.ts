@@ -178,7 +178,12 @@ describe('Orc controller agent configuration', () => {
 		await new Promise((resolve) => setTimeout(resolve, 0))
 
 		expect(agentConfigs).toHaveLength(4)
-		expect(modes.map((mode) => mode.key)).toEqual(['orc-proof-agent', 'orc-development-agent', 'orc-qa-agent'])
+		expect(modes.map((mode) => mode.key)).toEqual([
+			'orc-proof-agent',
+			'orc-development-agent',
+			'orc-qa-agent',
+			'orc-connection-verifier',
+		])
 		for (const config of agentConfigs) {
 			expect(config.extends).toBe('medium')
 			expect(config.tools.include).toBeUndefined()

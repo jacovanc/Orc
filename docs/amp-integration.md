@@ -44,6 +44,8 @@ There is deliberately no GitHub credential in this file and no controller secret
 
 Amp's Plugin API currently requires one manual **plugins: reload** after first installation; it exposes no supported programmatic reload. Registration key v11 is scoped to the immutable connection identity because Amp shares a key's durable webhook registration across project threads; a replacement connection therefore cannot inherit an older thread's handler. The controller also registers inert drain handlers for the retired v9/v10 keys: Amp retries undeliverable events in order, so removing an old handler can otherwise block every later connection. These handlers perform no callback, launch, cancellation, or other side effect. Permanently invalid, expired, or incorrectly bound requests are likewise acknowledged without processing or logging request data so one poison event cannot block the ordered queue; transient controller and network failures continue to retry. The controller writes its current capability URL to `.amp/runtime/launch-webhook-url` with mode `0600`; the setup tool submits it directly to the preallocated connection over HTTPS and queues verification. No secret is copied through a form.
 
+Every custom agent that can create an Orb—including the harmless connection verifier—is registered as an active project agent mode. This is an Amp requirement for custom-agent Orb creation, even when the mode is used only by the controller rather than selected manually.
+
 Configure Laravel without exposing values:
 
 ```dotenv
