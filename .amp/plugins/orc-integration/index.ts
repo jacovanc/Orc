@@ -155,6 +155,16 @@ export default function (amp: PluginAPI) {
 
 	amp.on('agent.end', async (event) => agentEndSafetyNet(event, config))
 
+	// Retired registrations can retain poison deliveries after their handler key
+	// disappears. Amp orders webhook delivery for the project plugin, so drain
+	// only these known superseded keys with an inert handler before registering
+	// the current immutable connection. They cannot launch or mutate anything.
+	for (const key of ['orc-stage-launch-v9', 'orc-stage-launch-v10']) {
+		void amp.createWebhook({ key, handler: async () => undefined }).catch(() => {
+			amp.logger.log('Orc retired webhook drain registration failed.')
+		})
+	}
+
 	void amp.createWebhook({
 		// Amp shares registrations by key across project threads. Bind the key to
 		// this immutable connection so re-pairing cannot retain a stale handler.
