@@ -96,6 +96,35 @@ class AmpIntegrationController extends Controller
         }
     }
 
+    public function refreshWebhook(Request $request, AmpProjectConnection $ampProjectConnection): JsonResponse
+    {
+        $payload = $request->validate([
+            'schema_version' => ['required', 'integer', 'in:1'],
+            'event_id' => ['required', 'uuid'],
+            'type' => ['required', 'in:controller.webhook_refreshed'],
+            'occurred_at' => ['required', 'date'],
+            'connection_id' => ['required', 'uuid'],
+            'amp_project_id' => ['required', 'string', 'max:100'],
+            'launch_webhook_url' => ['required', 'url:https', 'max:2048'],
+        ]);
+
+        if ($payload['event_id'] !== $request->attributes->get('amp_event_id')) {
+            return response()->json(['message' => 'Amp event ID does not match its signed header.'], 401);
+        }
+
+        try {
+            $result = $this->connections->refreshWebhook(
+                $ampProjectConnection,
+                $payload,
+                hash('sha256', $request->getContent()),
+            );
+        } catch (WorkflowConflict $exception) {
+            return response()->json(['message' => $exception->getMessage()], 409);
+        }
+
+        return response()->json($result);
+    }
+
     public function stageCapability(Request $request): JsonResponse
     {
         $token = $request->bearerToken();

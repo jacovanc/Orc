@@ -150,6 +150,56 @@ async function controllerHarness(testName: string, holdResponses = false) {
 }
 
 describe('Orc controller agent configuration', () => {
+	test('publishes the current durable webhook to its signed connection callback without exposing secrets', async () => {
+		process.env.AMP_PROJECT_ID = 'amp-project-test'
+		const root = '/tmp/orc-controller-webhook-refresh'
+		rmSync(root, { recursive: true, force: true })
+		mkdirSync(`${root}/.amp/runtime`, { recursive: true })
+		writeFileSync(`${root}/.amp/runtime/orc-plugin.json`, JSON.stringify({
+			connectionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+			ampProjectId: 'amp-project-test',
+			launchSigningSecret: 'launch-secret',
+			callbackSigningSecret: 'callback-secret',
+			connectionCallbackUrl: 'https://orc.test/api/integrations/amp/connections/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+		}))
+		const requests: Array<{ url: string; body: string; headers: Headers }> = []
+		globalThis.fetch = (async (input, init) => {
+			requests.push({
+				url: String(input),
+				body: String(init?.body),
+				headers: new Headers(init?.headers),
+			})
+			return Response.json({ accepted: true, disposition: 'updated' })
+		}) as typeof fetch
+
+		controller({
+			system: { workspaceRoot: `file://${root}` },
+			helpers: { filePathFromURI: () => root },
+			createAgent: (config: Record<string, any>) => ({ definition: config, createThread: async () => ({ id: 'unused' }) }),
+			registerAgentMode: () => undefined,
+			on: () => undefined,
+			createWebhook: async () => ({ url: 'https://amp.test/current-durable-capability' }),
+			logger: { log: () => undefined },
+		} as never)
+		await new Promise((resolve) => setTimeout(resolve, 20))
+
+		expect(requests).toHaveLength(1)
+		const request = requests[0]
+		expect(request.url).toBe('https://orc.test/api/integrations/amp/connections/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/webhook')
+		const payload = JSON.parse(request.body)
+		expect(payload.type).toBe('controller.webhook_refreshed')
+		expect(payload.amp_project_id).toBe('amp-project-test')
+		expect(payload.launch_webhook_url).toBe('https://amp.test/current-durable-capability')
+		expect(request.body).not.toContain('launch-secret')
+		expect(request.body).not.toContain('callback-secret')
+		expect(request.headers.get('x-orc-event-id')).toBe(payload.event_id)
+		const expected = `sha256=${createHmac('sha256', 'callback-secret')
+			.update(`${request.headers.get('x-orc-timestamp')}.${payload.event_id}.${request.body}`)
+			.digest('hex')}`
+		expect(request.headers.get('x-orc-signature')).toBe(expected)
+		rmSync(root, { recursive: true, force: true })
+	})
+
 	test('extends the normal medium agent and adds workflow tools without replacing defaults', async () => {
 		process.env.AMP_PROJECT_ID = 'amp-project-test'
 		const root = '/tmp/orc-controller-test-configured'

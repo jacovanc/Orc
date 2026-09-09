@@ -7,6 +7,7 @@ use App\Domain\Workflow\AmpLaunchStatus;
 use App\Models\AmpLaunch;
 use App\Services\AmpConnectionUrlGuard;
 use App\Services\AmpLaunchPayload;
+use App\Services\AmpProjectConnectionService;
 use App\Services\AmpSignature;
 use App\Services\WorkflowEngine;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -48,7 +49,9 @@ class DeliverAmpLaunch implements ShouldBeUnique, ShouldQueue
         AmpSignature $signature,
         WorkflowEngine $engine,
         AmpConnectionUrlGuard $urlGuard,
+        ?AmpProjectConnectionService $connections = null,
     ): void {
+        $connections ??= app(AmpProjectConnectionService::class);
         $launch = DB::transaction(function () {
             $locked = AmpLaunch::query()->lockForUpdate()->findOrFail($this->ampLaunchId);
 
@@ -142,6 +145,21 @@ class DeliverAmpLaunch implements ShouldBeUnique, ShouldQueue
         if ($response->status() === 408 || $response->status() === 429 || $response->serverError()) {
             $this->recordTransientFailure($launch, 'http_'.$response->status(), 'Retryable Amp webhook response.');
             throw new RuntimeException('Retryable Amp controller response.');
+        }
+
+        if (in_array($response->status(), [404, 410], true)) {
+            if (! $connections->markWebhookUnavailable($launch->ampProjectConnection, $url)) {
+                $this->recordTransientFailure($launch, 'controller_url_rotated', 'The controller webhook changed during delivery.');
+                throw new RuntimeException('Retrying delivery against the refreshed Amp controller webhook.');
+            }
+            $engine->failAmpLaunchDelivery(
+                $launch,
+                'http_'.$response->status(),
+                'The bound Amp controller webhook is unavailable. Pair a new connection from Project settings before starting another workflow.',
+                $response->status(),
+            );
+
+            return;
         }
 
         $engine->failAmpLaunchDelivery(

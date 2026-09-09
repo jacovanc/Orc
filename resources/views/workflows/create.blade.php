@@ -41,16 +41,12 @@
 
             <div class="p-6 sm:p-8">
                 <p class="font-mono text-xs uppercase tracking-[0.16em] text-orange-400">02 · GitHub issue</p>
-                <div class="mt-6 grid gap-6 sm:grid-cols-[1fr_10rem]">
+                <div class="mt-6 grid gap-6 sm:grid-cols-[1fr_12rem]">
                     <div><label class="field-label">Repository</label><div class="field-input font-mono text-zinc-400">{{ $project->github_repository }}</div><p class="field-help">Fixed by the project’s canonical binding.</p></div>
                     <div>
                         <label class="field-label" for="github_issue_number">Issue number</label>
                         <input class="field-input" type="number" min="1" id="github_issue_number" name="github_issue_number" value="{{ old('github_issue_number') }}" placeholder="42" required>
-                    </div>
-                    <div class="sm:col-span-2">
-                        <label class="field-label" for="github_issue_url">Issue URL</label>
-                        <input class="field-input" type="url" id="github_issue_url" name="github_issue_url" value="{{ old('github_issue_url') }}" placeholder="https://github.com/{{ $project->github_repository }}/issues/42" required>
-                        <p class="field-help">This must match the repository and issue number above. Orc does not copy the issue body.</p>
+                        <p class="field-help">Orc derives the issue link automatically.</p>
                     </div>
                 </div>
             </div>

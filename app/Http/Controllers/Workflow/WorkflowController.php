@@ -69,14 +69,16 @@ class WorkflowController extends Controller
         $definition = WorkflowDefinition::query()
             ->where('is_active', true)
             ->findOrFail($request->integer('workflow_definition_id'));
+        $issueNumber = $request->integer('github_issue_number');
+        $issueUrl = sprintf('https://github.com/%s/issues/%d', $project->github_repository, $issueNumber);
 
         try {
             $run = $this->engine->start(
                 $request->user(),
                 $definition,
                 $project,
-                $request->integer('github_issue_number'),
-                $request->string('github_issue_url')->toString(),
+                $issueNumber,
+                $issueUrl,
             );
         } catch (WorkflowConflict $exception) {
             return back()->withInput()->withErrors(['workflow' => $exception->getMessage()]);

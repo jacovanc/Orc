@@ -42,11 +42,11 @@ class WorkflowPagesTest extends TestCase
         $response = $this->actingAs($this->user)->post(route('projects.workflows.store', $project), [
             'workflow_definition_id' => $definition->id,
             'github_issue_number' => 18,
-            'github_issue_url' => 'https://github.com/acme/widgets/issues/18',
         ]);
 
         $run = WorkflowRun::query()->sole();
         $response->assertRedirect(route('workflows.show', $run));
+        $this->assertSame('https://github.com/acme/widgets/issues/18', $run->github_issue_url);
 
         $this->actingAs($this->user)
             ->get(route('workflows.show', $run))
@@ -61,23 +61,30 @@ class WorkflowPagesTest extends TestCase
         $this->assertDatabaseMissing('workflow_runs', ['github_issue_url' => 'requirements text']);
     }
 
-    public function test_start_rejects_mismatched_or_non_github_issue_urls(): void
+    public function test_start_form_needs_only_an_issue_number_and_ignores_injected_issue_urls(): void
     {
         $definition = WorkflowDefinition::query()->where('version', 1)->sole();
+        $project = $this->workflowProject($this->user, 'acme/widgets');
 
-        foreach (['https://example.com/acme/widgets/issues/18', 'https://github.com/acme/other/issues/18'] as $url) {
-            $this->actingAs($this->user)
-                ->from(route('projects.workflows.create', $project = $this->workflowProject($this->user, 'acme/widgets')))
-                ->post(route('projects.workflows.store', $project), [
-                    'workflow_definition_id' => $definition->id,
-                    'github_issue_number' => 18,
-                    'github_issue_url' => $url,
-                ])
-                ->assertRedirect(route('projects.workflows.create', $project))
-                ->assertSessionHasErrors('github_issue_url');
-        }
+        $this->actingAs($this->user)
+            ->get(route('projects.workflows.create', $project))
+            ->assertOk()
+            ->assertSee('Orc derives the issue link automatically.')
+            ->assertDontSee('github_issue_url', false)
+            ->assertDontSee('Issue URL');
 
-        $this->assertDatabaseCount('workflow_runs', 0);
+        $this->actingAs($this->user)
+            ->post(route('projects.workflows.store', $project), [
+                'workflow_definition_id' => $definition->id,
+                'github_issue_number' => 18,
+                'github_issue_url' => 'https://example.com/attacker/issues/999',
+            ])->assertRedirect();
+
+        $this->assertDatabaseHas('workflow_runs', [
+            'github_repository' => 'acme/widgets',
+            'github_issue_number' => 18,
+            'github_issue_url' => 'https://github.com/acme/widgets/issues/18',
+        ]);
     }
 
     public function test_owner_can_simulate_agent_completion_and_cancel(): void

@@ -18,6 +18,7 @@ use App\Models\WorkflowDefinition;
 use App\Models\WorkflowRun;
 use App\Services\AmpConnectionUrlGuard;
 use App\Services\AmpLaunchPayload;
+use App\Services\AmpProjectConnectionService;
 use App\Services\AmpSignature;
 use App\Services\WorkflowEngine;
 use Database\Seeders\DevelopmentWorkflowSeeder;
@@ -484,6 +485,48 @@ class AmpIntegrationTest extends TestCase
             app(AmpConnectionUrlGuard::class),
         );
         Http::assertNothingSent();
+    }
+
+    public function test_unavailable_webhook_fails_launch_and_connection_while_a_concurrent_refresh_is_retried(): void
+    {
+        $failedRun = $this->startRun();
+        $failedLaunch = $failedRun->activeStageRun->ampLaunch;
+        Http::fake(['*' => Http::response('gone', 404)]);
+        (new DeliverAmpLaunch($failedLaunch->id))->handle(
+            app(AmpLaunchPayload::class),
+            app(AmpSignature::class),
+            $this->engine,
+            app(AmpConnectionUrlGuard::class),
+            app(AmpProjectConnectionService::class),
+        );
+
+        $this->assertSame(AmpDeliveryStatus::Failed, $failedLaunch->fresh()->delivery_status);
+        $this->assertSame(AmpLaunchStatus::Failed, $failedLaunch->fresh()->launch_status);
+        $this->assertSame(WorkflowStatus::Failed, $failedRun->fresh()->status);
+        $this->assertSame('failed', $failedLaunch->ampProjectConnection->fresh()->status);
+        $this->assertSame('webhook_unavailable', $failedLaunch->ampProjectConnection->fresh()->last_error_code);
+        $this->assertStringContainsString('Pair a new connection', $failedLaunch->fresh()->last_error_message);
+
+        $failedLaunch->ampProjectConnection->update([
+            'status' => 'verified',
+            'verified_at' => now(),
+            'last_error_code' => null,
+            'last_error_message' => null,
+        ]);
+        $racingRun = $this->startRun();
+        $racingLaunch = $racingRun->activeStageRun->ampLaunch;
+        $connections = $this->mock(AmpProjectConnectionService::class);
+        $connections->shouldReceive('markWebhookUnavailable')->once()->andReturn(false);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('refreshed Amp controller webhook');
+        (new DeliverAmpLaunch($racingLaunch->id))->handle(
+            app(AmpLaunchPayload::class),
+            app(AmpSignature::class),
+            $this->engine,
+            app(AmpConnectionUrlGuard::class),
+            $connections,
+        );
     }
 
     private function startRun(): WorkflowRun

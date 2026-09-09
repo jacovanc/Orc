@@ -2,12 +2,15 @@
 
 namespace App\Services;
 
+use App\Domain\Workflow\AmpIntegrationEventStatus;
 use App\Domain\Workflow\Exceptions\WorkflowConflict;
 use App\Jobs\VerifyAmpProjectConnection;
 use App\Models\AmpConnectionSetup;
+use App\Models\AmpIntegrationEvent;
 use App\Models\AmpProjectConnection;
 use App\Models\Project;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -139,6 +142,7 @@ class AmpProjectConnectionService
                     'ampProjectId' => $connection->amp_project_id,
                     'launchSigningSecret' => $connection->launch_signing_secret,
                     'callbackSigningSecret' => $connection->callback_signing_secret,
+                    'connectionCallbackUrl' => url('/api/integrations/amp/connections/'.$connection->public_id),
                 ],
             ];
         }, 3);
@@ -188,6 +192,93 @@ class AmpProjectConnectionService
             'disposition' => $shouldVerify ? 'completed' : 'already_completed',
             'verification_status' => $connection->fresh()->status,
         ];
+    }
+
+    public function refreshWebhook(AmpProjectConnection $connection, array $payload, string $payloadHash): array
+    {
+        if (
+            $payload['connection_id'] !== $connection->public_id
+            || $payload['amp_project_id'] !== $connection->amp_project_id
+        ) {
+            throw new WorkflowConflict('This webhook refresh belongs to a different Amp project connection.');
+        }
+        $this->urlGuard->assertAllowed($payload['launch_webhook_url']);
+
+        try {
+            return DB::transaction(function () use ($connection, $payload, $payloadHash) {
+                $existing = AmpIntegrationEvent::query()
+                    ->where('event_id', $payload['event_id'])
+                    ->lockForUpdate()
+                    ->first();
+                if ($existing) {
+                    if ($existing->payload_hash !== $payloadHash) {
+                        throw new WorkflowConflict('An Amp event ID was reused with a different payload.');
+                    }
+
+                    return $existing->response;
+                }
+
+                $locked = AmpProjectConnection::query()
+                    ->with('project.user')
+                    ->lockForUpdate()
+                    ->findOrFail($connection->id);
+                $this->assertCanManage($locked->project, $locked->project->user);
+                if (! $locked->setups()->where('status', 'completed')->exists()) {
+                    throw new WorkflowConflict('The project controller must finish setup before refreshing its webhook.');
+                }
+                if (
+                    $payload['connection_id'] !== $locked->public_id
+                    || $payload['amp_project_id'] !== $locked->amp_project_id
+                ) {
+                    throw new WorkflowConflict('This webhook refresh belongs to a different Amp project connection.');
+                }
+
+                $changed = trim($payload['launch_webhook_url']) !== (string) $locked->launch_webhook_url;
+                if ($changed) {
+                    $locked->forceFill(['launch_webhook_url' => trim($payload['launch_webhook_url'])])->save();
+                }
+                $response = [
+                    'accepted' => true,
+                    'disposition' => $changed ? 'updated' : 'unchanged',
+                ];
+                AmpIntegrationEvent::query()->create([
+                    'event_id' => $payload['event_id'],
+                    'event_type' => $payload['type'],
+                    'stage_run_id' => null,
+                    'payload_hash' => $payloadHash,
+                    'status' => AmpIntegrationEventStatus::Processed,
+                    'response' => $response,
+                    'occurred_at' => $payload['occurred_at'],
+                    'processed_at' => now(),
+                ]);
+
+                return $response;
+            }, 3);
+        } catch (QueryException $exception) {
+            $existing = AmpIntegrationEvent::query()->where('event_id', $payload['event_id'])->first();
+            if (! $existing || $existing->payload_hash !== $payloadHash) {
+                throw $exception;
+            }
+
+            return $existing->response;
+        }
+    }
+
+    public function markWebhookUnavailable(AmpProjectConnection $connection, string $attemptedUrl): bool
+    {
+        return DB::transaction(function () use ($connection, $attemptedUrl) {
+            $locked = AmpProjectConnection::query()->lockForUpdate()->findOrFail($connection->id);
+            if (! hash_equals((string) $locked->launch_webhook_url, $attemptedUrl)) {
+                return false;
+            }
+            $locked->forceFill([
+                'status' => 'failed',
+                'last_error_code' => 'webhook_unavailable',
+                'last_error_message' => 'The Amp controller webhook is unavailable. Generate a new setup prompt from Project settings and pair it in the same Amp project.',
+            ])->save();
+
+            return true;
+        }, 3);
     }
 
     public function configure(Project $project, User $actor, array $attributes): AmpProjectConnection

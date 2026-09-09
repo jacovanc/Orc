@@ -75,7 +75,6 @@ class RegistrationTest extends TestCase
         $this->from(route('projects.workflows.create', $project))->post(route('projects.workflows.store', $project), [
             'workflow_definition_id' => WorkflowDefinition::query()->where('version', 2)->sole()->id,
             'github_issue_number' => 42,
-            'github_issue_url' => 'https://github.com/acme/widgets/issues/42',
         ])->assertRedirect(route('projects.workflows.create', $project))
             ->assertSessionHasErrors('workflow');
 

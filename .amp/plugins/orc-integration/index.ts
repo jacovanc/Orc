@@ -22,6 +22,7 @@ type RuntimeConfig = {
 	ampProjectId: string
 	launchSigningSecret: string
 	callbackSigningSecret: string
+	connectionCallbackUrl?: string
 }
 
 type LaunchPayload = {
@@ -192,14 +193,37 @@ export default function (amp: PluginAPI) {
 				amp.logger.log('Orc discarded a permanently invalid webhook delivery.')
 			}
 		},
-	}).then((registration) => {
+	}).then(async (registration) => {
 		mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 })
 		writeFileSync(webhookPath, registration.url, { mode: 0o600 })
 		chmodSync(webhookPath, 0o600)
+		await refreshWebhookRegistration(config, registration.url)
 	}).catch(() => {
 		// Never log the capability URL or potentially credential-bearing details.
 		amp.logger.log('Orc webhook registration or publication failed.')
 	})
+}
+
+async function refreshWebhookRegistration(config: RuntimeConfig, launchWebhookUrl: string) {
+	if (!config.connectionCallbackUrl?.startsWith('https://')) return
+
+	const eventId = randomUUID()
+	const payload = {
+		schema_version: 1,
+		event_id: eventId,
+		type: 'controller.webhook_refreshed',
+		occurred_at: new Date().toISOString(),
+		connection_id: config.connectionId,
+		amp_project_id: actualAmpProjectId(),
+		launch_webhook_url: launchWebhookUrl,
+	}
+	const url = `${config.connectionCallbackUrl.replace(/\/$/, '')}/webhook`
+	for (const delay of [0, 400, 1200]) {
+		if (delay) await sleep(delay)
+		const result = await signedPost(config, url, payload, eventId).catch(() => null)
+		if (result?.response.ok || (result && result.response.status < 500)) return
+	}
+	throw new Error('Orc could not refresh the controller webhook registration.')
 }
 
 async function handleLaunch(

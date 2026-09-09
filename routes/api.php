@@ -9,6 +9,7 @@ Route::middleware([VerifyAmpConnectionSignature::class, 'throttle:60,1'])
     ->group(function () {
         Route::post('/callback', [AmpIntegrationController::class, 'callback']);
         Route::post('/context', [AmpIntegrationController::class, 'context']);
+        Route::post('/webhook', [AmpIntegrationController::class, 'refreshWebhook']);
     });
 
 Route::post('/integrations/amp/stage-capability', [AmpIntegrationController::class, 'stageCapability'])

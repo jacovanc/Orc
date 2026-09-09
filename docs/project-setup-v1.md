@@ -14,7 +14,7 @@ The deployed application serves this version publicly at `/docs/project-setup-v1
    - `.amp/runtime/orc-plugin.json` with mode `0600`;
    - the controller-generated `.amp/runtime/launch-webhook-url` with mode `0600`.
 5. Amp's Plugin API has no programmatic reload operation. If requested, run **plugins: reload** once in the same thread, then tell the agent to continue. The second tool call submits the webhook directly over HTTPS and queues verification.
-6. Refresh Orc. A successful harmless check shows the connection as **verified** and links its fresh verification thread. A failure stays fail-closed with a safe error; use **Generate new setup prompt** to create a new immutable version and revoke the old unused capability.
+6. Refresh Orc. A successful harmless check shows the connection as **verified** and links its fresh verification thread. The trusted controller securely republishes its current durable webhook registration to Laravel whenever it loads. A missing/retired webhook fails closed; use **Generate new setup prompt** to pair a new immutable version.
 
 The tool modifies no unrelated plugin. The personal `orc-worker` User Plugin must already be active; the presence of `orc_setup_project` proves that prerequisite. Global User Plugin publication is managed separately from project pairing.
 

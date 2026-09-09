@@ -6,9 +6,11 @@ use App\Jobs\VerifyAmpProjectConnection;
 use App\Models\Project;
 use App\Models\User;
 use App\Services\AmpProjectConnectionService;
+use App\Services\AmpSignature;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class ProjectSetupTest extends TestCase
@@ -161,6 +163,83 @@ class ProjectSetupTest extends TestCase
         Queue::assertPushed(VerifyAmpProjectConnection::class, 1);
     }
 
+    public function test_completed_controller_securely_refreshes_a_rotated_webhook_idempotently(): void
+    {
+        ['project' => $project, 'connection' => $connection, 'setup' => $setup] = $this->pendingSetup();
+        $setup->update(['status' => 'completed', 'completed_at' => now()]);
+        $connection->update([
+            'launch_webhook_url' => 'https://hooks.ampcode.com/old-capability',
+            'status' => 'verified',
+            'verified_at' => now(),
+        ]);
+        $eventId = (string) Str::uuid();
+        $payload = [
+            'schema_version' => 1,
+            'event_id' => $eventId,
+            'type' => 'controller.webhook_refreshed',
+            'occurred_at' => now()->toISOString(),
+            'connection_id' => $connection->public_id,
+            'amp_project_id' => $connection->amp_project_id,
+            'launch_webhook_url' => 'https://hooks.ampcode.com/rotated-capability',
+        ];
+
+        $this->postSignedConnectionJson($connection, 'webhook', $payload)
+            ->assertOk()
+            ->assertExactJson(['accepted' => true, 'disposition' => 'updated']);
+        $this->postSignedConnectionJson($connection, 'webhook', $payload)
+            ->assertOk()
+            ->assertExactJson(['accepted' => true, 'disposition' => 'updated']);
+
+        $this->assertSame('https://hooks.ampcode.com/rotated-capability', $connection->fresh()->launch_webhook_url);
+        $this->assertSame('verified', $connection->fresh()->status);
+        $this->assertDatabaseCount('amp_integration_events', 1);
+        $this->assertDatabaseHas('amp_integration_events', [
+            'event_id' => $eventId,
+            'event_type' => 'controller.webhook_refreshed',
+            'stage_run_id' => null,
+            'status' => 'processed',
+        ]);
+        $raw = DB::table('amp_project_connections')->where('id', $connection->id)->sole();
+        $this->assertNotSame('https://hooks.ampcode.com/rotated-capability', $raw->launch_webhook_url);
+
+        $this->postSignedConnectionJson($connection, 'webhook', [
+            ...$payload,
+            'launch_webhook_url' => 'https://hooks.ampcode.com/reused-event',
+        ])->assertConflict();
+        $this->assertSame('https://hooks.ampcode.com/rotated-capability', $connection->fresh()->launch_webhook_url);
+    }
+
+    public function test_webhook_refresh_rejects_incomplete_setup_wrong_identity_and_revoked_operator(): void
+    {
+        ['connection' => $connection, 'setup' => $setup] = $this->pendingSetup();
+        $connection->update(['launch_webhook_url' => 'https://hooks.ampcode.com/original']);
+        $payload = [
+            'schema_version' => 1,
+            'event_id' => (string) Str::uuid(),
+            'type' => 'controller.webhook_refreshed',
+            'occurred_at' => now()->toISOString(),
+            'connection_id' => $connection->public_id,
+            'amp_project_id' => $connection->amp_project_id,
+            'launch_webhook_url' => 'https://hooks.ampcode.com/replacement',
+        ];
+
+        $this->postSignedConnectionJson($connection, 'webhook', $payload)->assertConflict();
+        $setup->update(['status' => 'completed', 'completed_at' => now()]);
+        $this->postSignedConnectionJson($connection, 'webhook', [
+            ...$payload,
+            'event_id' => (string) Str::uuid(),
+            'amp_project_id' => 'another-project',
+        ])->assertConflict();
+        $this->owner->update(['can_trigger_amp' => false]);
+        $this->postSignedConnectionJson($connection, 'webhook', [
+            ...$payload,
+            'event_id' => (string) Str::uuid(),
+        ])->assertConflict();
+
+        $this->assertSame('https://hooks.ampcode.com/original', $connection->fresh()->launch_webhook_url);
+        $this->assertDatabaseCount('amp_integration_events', 0);
+    }
+
     public function test_wrong_project_expiry_replay_and_reissue_fail_closed(): void
     {
         ['project' => $project, 'setup' => $setup] = $this->pendingSetup();
@@ -281,5 +360,32 @@ class ProjectSetupTest extends TestCase
         $issued = app(AmpProjectConnectionService::class)->issueSetup($project, $this->owner);
 
         return ['project' => $project->fresh('currentConnection'), ...$issued];
+    }
+
+    private function postSignedConnectionJson($connection, string $path, array $payload)
+    {
+        $body = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        $timestamp = now()->timestamp;
+        $signature = app(AmpSignature::class)->sign(
+            $body,
+            $payload['event_id'],
+            $timestamp,
+            $connection->callback_signing_secret,
+        );
+
+        return $this->call(
+            'POST',
+            '/api/integrations/amp/connections/'.$connection->public_id.'/'.$path,
+            [],
+            [],
+            [],
+            [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_X_ORC_EVENT_ID' => $payload['event_id'],
+                'HTTP_X_ORC_TIMESTAMP' => (string) $timestamp,
+                'HTTP_X_ORC_SIGNATURE' => $signature,
+            ],
+            $body,
+        );
     }
 }
