@@ -63,6 +63,8 @@ const launches = new Map<string, LaunchPayload>()
 const safetyNudged = new Set<string>()
 const monitoredThreads = new Set<string>()
 
+class PermanentWebhookInputError extends Error {}
+
 export default function (amp: PluginAPI) {
 	const root = amp.system.workspaceRoot
 		? amp.helpers.filePathFromURI(amp.system.workspaceRoot)
@@ -170,7 +172,18 @@ export default function (amp: PluginAPI) {
 		// this immutable connection so re-pairing cannot retain a stale handler.
 		key: `orc-stage-launch-v11-${config.connectionId}`,
 		headers: ['idempotency-key', 'x-orc-event-id', 'x-orc-timestamp', 'x-orc-signature'],
-		handler: async (event, ctx) => handleLaunch(event, ctx, config, proofAgent, developmentAgent, qaAgent, verificationAgent, amp),
+		handler: async (event, ctx) => {
+			try {
+				await handleLaunch(event, ctx, config, proofAgent, developmentAgent, qaAgent, verificationAgent, amp)
+			} catch (error) {
+				if (!(error instanceof PermanentWebhookInputError)) throw error
+
+				// Invalid, expired, or incorrectly bound input can never succeed on a
+				// retry. Acknowledge it without logging request details so one poison
+				// delivery cannot block later valid commands in Amp's ordered queue.
+				amp.logger.log('Orc discarded a permanently invalid webhook delivery.')
+			}
+		},
 	}).then((registration) => {
 		mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 })
 		writeFileSync(webhookPath, registration.url, { mode: 0o600 })
@@ -199,7 +212,7 @@ async function handleLaunch(
 	const timestamp = ctxHeader(event, 'x-orc-timestamp')
 	const signature = ctxHeader(event, 'x-orc-signature')
 	verifyLaunchSignature(body, eventId, timestamp, signature, config.launchSigningSecret)
-	const envelope = JSON.parse(body) as Record<string, unknown>
+	const envelope = parseEnvelope(body)
 	if (envelope.command === 'verify_connection') {
 		await handleConnectionVerification(envelope, config, verificationAgent, ctx.signal)
 		return
@@ -213,24 +226,26 @@ async function handleLaunch(
 			|| typeof envelope.thread_id !== 'string'
 			|| !/^T-[A-Za-z0-9-]+$/.test(envelope.thread_id)
 		) {
-			throw new Error('Malformed Orc cancellation command.')
+			throw new PermanentWebhookInputError('Malformed Orc cancellation command.')
 		}
 		await amp.threads.get(envelope.thread_id).cancel()
 		return
 	}
 
 	const payload = parseLaunch(body)
-	if (payload.event_id !== eventId) throw new Error('Signed launch event ID does not match the body.')
+	if (payload.event_id !== eventId) throw new PermanentWebhookInputError('Signed launch event ID does not match the body.')
 	const reconciliationSuffix = idempotencyKey.startsWith(`${payload.idempotency_key}:reconcile:`)
 		? idempotencyKey.slice(`${payload.idempotency_key}:reconcile:`.length)
 		: ''
 	const reconciliation = /^\d+$/.test(reconciliationSuffix)
 	if (payload.idempotency_key !== idempotencyKey && !reconciliation) {
-		throw new Error('Launch idempotency key does not match the body.')
+		throw new PermanentWebhookInputError('Launch idempotency key does not match the body.')
 	}
 
 	const claim = await callback(config, payload, 'launch.claim', {}, ctx.signal)
-	if (!claim.accepted) throw new Error(`Orc rejected launch claim: ${claim.reason ?? 'unknown reason'}`)
+	// A rejected claim is a durable stale/cancelled/binding decision. Retrying the
+	// same delivery cannot create a valid attempt and would block the queue.
+	if (!claim.accepted) return
 
 	if (!claim.launch) {
 		const remembered = launches.get(payload.idempotency_key)
@@ -561,19 +576,32 @@ async function signedPost(
 }
 
 function verifyLaunchSignature(body: string, eventId: string, timestamp: string, signature: string, secret: string) {
-	if (!/^\d+$/.test(timestamp)) throw new Error('Invalid launch timestamp.')
-	if (Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp)) > 300) throw new Error('Expired launch request.')
+	if (!/^\d+$/.test(timestamp)) throw new PermanentWebhookInputError('Invalid launch timestamp.')
+	if (Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp)) > 300) throw new PermanentWebhookInputError('Expired launch request.')
 
 	const expected = sign(body, eventId, timestamp, secret)
 	const expectedBytes = encoder.encode(expected)
 	const actualBytes = encoder.encode(signature)
 	if (expectedBytes.length !== actualBytes.length || !timingSafeEqual(expectedBytes, actualBytes)) {
-		throw new Error('Invalid launch signature.')
+		throw new PermanentWebhookInputError('Invalid launch signature.')
 	}
 }
 
 function sign(body: string, eventId: string, timestamp: string, secret: string) {
 	return `sha256=${createHmac('sha256', secret).update(`${timestamp}.${eventId}.${body}`).digest('hex')}`
+}
+
+function parseEnvelope(body: string): Record<string, unknown> {
+	try {
+		const envelope = JSON.parse(body)
+		if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
+			throw new Error('Expected an object.')
+		}
+
+		return envelope as Record<string, unknown>
+	} catch {
+		throw new PermanentWebhookInputError('Malformed Orc webhook body.')
+	}
 }
 
 function parseLaunch(body: string): LaunchPayload {
@@ -602,7 +630,7 @@ function parseLaunch(body: string): LaunchPayload {
 		|| typeof payload.expected_branch !== 'string'
 		|| !Array.isArray(payload.allowed_outcomes)
 	) {
-		throw new Error('Malformed Orc launch request.')
+		throw new PermanentWebhookInputError('Malformed Orc launch request.')
 	}
 
 	return payload as LaunchPayload
@@ -633,7 +661,7 @@ async function handleConnectionVerification(
 		|| typeof envelope.github_repository !== 'string'
 		|| typeof envelope.verification_url !== 'string'
 		|| typeof envelope.verification_token !== 'string'
-	) throw new Error('Malformed Orc connection verification request.')
+	) throw new PermanentWebhookInputError('Malformed Orc connection verification request.')
 
 	const base = {
 		schema_version: 1,
@@ -709,7 +737,7 @@ function assertControllerBinding(payload: Record<string, unknown>, config: Runti
 		|| (payload.expected_amp_project_id !== undefined && payload.expected_amp_project_id !== config.ampProjectId)
 		|| (payload.amp_project_id !== undefined && payload.amp_project_id !== config.ampProjectId)
 		|| actualAmpProjectId() !== config.ampProjectId
-	) throw new Error('This request is bound to a different Amp project controller.')
+	) throw new PermanentWebhookInputError('This request is bound to a different Amp project controller.')
 }
 
 function actualAmpProjectId() {
@@ -721,7 +749,7 @@ function actualAmpProjectId() {
 
 function ctxHeader(event: WebhookEvent, name: string): string {
 	const value = event.headers[name]
-	if (!value) throw new Error(`Missing required ${name} header.`)
+	if (!value) throw new PermanentWebhookInputError(`Missing required ${name} header.`)
 	return value
 }
 

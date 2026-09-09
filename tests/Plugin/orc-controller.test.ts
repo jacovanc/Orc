@@ -62,6 +62,7 @@ async function controllerHarness(testName: string, holdResponses = false) {
 	let monitorWaiting = false
 	let monitorWasWaitingWhenPrompted = false
 	let agentEndHandler: ((event: Record<string, any>) => Promise<unknown>) | undefined
+	const logMessages: string[] = []
 	const thread = {
 		id: 'T-00000000-0000-0000-0000-000000000041',
 		cancel: async () => { cancelled++ },
@@ -98,7 +99,7 @@ async function controllerHarness(testName: string, holdResponses = false) {
 			return { url: 'https://amp.test/durable-webhook' }
 		},
 		threads: { get: () => thread },
-		logger: { log: () => undefined },
+		logger: { log: (message: string) => logMessages.push(message) },
 	} as never)
 	await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -126,7 +127,18 @@ async function controllerHarness(testName: string, holdResponses = false) {
 				signal: new AbortController().signal,
 			})
 		},
+		invokeRaw: async (body: string, headers: Record<string, string> = {}) => {
+			if (!handler) throw new Error('Controller did not register its webhook.')
+			await handler({
+				body: new TextEncoder().encode(body),
+				headers,
+			}, {
+				thread: { id: 'T-controller' },
+				signal: new AbortController().signal,
+			})
+		},
 		counts: () => ({ createThreadCalls, cancelled, prompted }),
+		logMessages: () => logMessages,
 		createThreadOptions: () => createThreadOptions,
 		failCreateThread: (error: Error) => { createThreadError = error },
 		monitorWasWaitingWhenPrompted: () => monitorWasWaitingWhenPrompted,
@@ -228,6 +240,23 @@ describe('Orc controller agent configuration', () => {
 
 		expect(callbackTypes).toEqual(['launch.claim', 'launch.ambiguous'])
 		expect(harness.counts()).toEqual({ createThreadCalls: 0, cancelled: 0, prompted: 0 })
+		rmSync(harness.root, { recursive: true, force: true })
+	})
+
+	test('acknowledges permanently invalid webhook input without blocking later valid commands', async () => {
+		const harness = await controllerHarness('invalid-input-drain')
+		let fetchCalls = 0
+		globalThis.fetch = (async () => {
+			fetchCalls++
+			return Response.json({ accepted: false })
+		}) as typeof fetch
+
+		await expect(harness.invokeRaw('{}')).resolves.toBeUndefined()
+		await expect(harness.invoke(launch())).resolves.toBeUndefined()
+
+		expect(fetchCalls).toBe(1)
+		expect(harness.counts()).toEqual({ createThreadCalls: 0, cancelled: 0, prompted: 0 })
+		expect(harness.logMessages()).toEqual(['Orc discarded a permanently invalid webhook delivery.'])
 		rmSync(harness.root, { recursive: true, force: true })
 	})
 
