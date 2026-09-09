@@ -89,7 +89,7 @@ class AmpProjectConnectionService
             '   worker_url: '.route('integrations.amp.worker-plugin-v1'),
             '   worker_sha256: '.hash('sha256', $workerSource),
             '3. Never put the setup capability below in a shell command, file, Git commit, plugin source, or log. Worker installation does not need it.',
-            '4. If the `orc_setup_project` tool is not active after publishing the worker, ask me to run “plugins: reload” once. After the reload, continue in this same thread and call that tool with the fields below.',
+            '4. If `reload_plugins` is available, use it yourself after publishing the worker and confirm `orc_setup_project` is active. Only if no supported reload tool is available, ask me to run “plugins: reload” once. Then continue in this same thread and call `orc_setup_project` with the fields below.',
             '',
             'The setup tool exchanges controller material over HTTPS and writes only owner-readable gitignored runtime configuration.',
             '',
@@ -98,7 +98,7 @@ class AmpProjectConnectionService
             'setup_capability: '.$setup->token,
             '',
             'This is Orc setup protocol v1. Public authoritative runbook: '.route('docs.project-setup-v1'),
-            'After the tool installs this project’s controller, it may require one additional “plugins: reload”; ask me, then call `orc_setup_project` again with the same fields. Do not claim setup or verification succeeded until the tool confirms it.',
+            'After the setup tool installs this project’s controller, reload plugins yourself if `reload_plugins` is available; otherwise ask me to run “plugins: reload”. Then call `orc_setup_project` again with the same fields. Do not claim setup or verification succeeded until the tool confirms it.',
             'This setup thread becomes the dedicated owner of the connection webhook. Keep it unarchived while Orc uses this connection. Ordinary idle Orb sleep is expected and incoming events wake it; do not add polling or keep-alive work.',
         ]);
     }

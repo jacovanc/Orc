@@ -46,7 +46,7 @@
                         <button class="button-primary" type="button" @click="navigator.clipboard.writeText(document.getElementById('amp-setup-prompt').value); copied = true; setTimeout(() => copied = false, 1800)"><span x-text="copied ? 'Copied' : 'Copy setup prompt'">Copy setup prompt</span></button>
                         <span class="text-xs text-zinc-600">Expires {{ $setup->expires_at->diffForHumans() }} · single connection, thread, and Amp project only</span>
                     </div>
-                    <p class="mt-4 text-xs leading-5 text-zinc-600">A fresh Amp account needs no Orc prerequisite. The agent first publishes Orc’s pinned worker to your Personal Plugins, asks you to reload, and then performs project pairing.</p>
+                    <p class="mt-4 text-xs leading-5 text-zinc-600">A fresh Amp account needs no Orc prerequisite. The agent first publishes Orc’s pinned worker to your Personal Plugins, reloads plugins itself when supported, and then performs project pairing. It asks you to reload only when it cannot.</p>
                     @if ($setup->status === 'claimed')
                         <p class="mt-4 rounded-xl border border-sky-300/15 bg-sky-300/[0.04] p-4 text-xs leading-5 text-sky-100/70">The setup agent claimed this prompt. If it asks for a plugin reload, run <strong class="text-sky-100">plugins: reload</strong> in that same Amp thread, then tell it to continue.</p>
                     @endif

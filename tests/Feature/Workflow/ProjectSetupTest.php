@@ -96,6 +96,8 @@ class ProjectSetupTest extends TestCase
             ->assertSee('orc_setup_project')
             ->assertSee('self-bootstrapping')
             ->assertSee('Personal User Plugins repository')
+            ->assertSee('reload_plugins')
+            ->assertSee('Only if no supported reload tool is available')
             ->assertSee(route('integrations.amp.worker-plugin-v1'), false)
             ->assertSee(hash('sha256', (string) file_get_contents(resource_path('amp/orc-worker-v1.ts'))))
             ->assertSee($setup->public_id)
