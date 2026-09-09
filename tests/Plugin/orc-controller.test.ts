@@ -240,21 +240,15 @@ describe('Orc controller agent configuration', () => {
 			expect(config.tools.exclude).toBeUndefined()
 			expect(Array.isArray(config.tools.add)).toBeTrue()
 		}
-		expect(agentConfigs[0].tools.add).toEqual([
-			'workflow_read_issue',
-			'workflow_post_test_comment',
-			'workflow_complete',
-		])
-		expect(agentConfigs[1].tools.add).toContain('workflow_record_publication')
+		expect(agentConfigs[0].tools.add).toEqual(['workflow_complete'])
+		expect(agentConfigs[1].tools.add).toEqual(['workflow_complete'])
 		expect(agentConfigs[1].model).toBe('openai/gpt-5.6-sol')
 		expect(agentConfigs[1].instructions).toContain('origin may be an Amp-hosted project remote')
-		expect(agentConfigs[2].tools.add).toEqual([
-			'workflow_read_qa_context',
-			'workflow_post_qa_report',
-			'workflow_complete',
-		])
+		expect(agentConfigs[1].instructions).toContain('normal Amp toolset')
+		expect(agentConfigs[2].tools.add).toEqual(['workflow_complete'])
 		expect(agentConfigs[2].model).toBe('openai/gpt-5.6-sol')
 		expect(agentConfigs[2].instructions).toContain('Do not change implementation files')
+		expect(agentConfigs[2].instructions).toContain('normal native gh')
 		expect(agentConfigs[3].tools.add).toEqual(['workflow_verify_project_connection'])
 		rmSync(root, { recursive: true, force: true })
 	})

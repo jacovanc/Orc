@@ -37,9 +37,9 @@ Orc does **not** store issue bodies, prompts, generated code, reports, discussio
 
 The integration is disabled by default. It requires a database queue worker and one trusted controller registered inside every Amp project Orc should route to.
 
-1. Create the Orc Project with its canonical `owner/repository` and the selected Amp project's actual `AMP_PROJECT_ID`. Orc immediately preallocates an immutable connection identity.
+1. Create the Orc Project with a display name and canonical `owner/repository`. You do not need to find an Amp project ID; Orc immediately preallocates an immutable pending connection identity.
 2. Open Project Settings and copy its short-lived setup prompt into an already-authenticated agent in that exact Amp project.
-3. The `orc_setup_project` User Plugin tool verifies project identity, installs the SHA-256-pinned project controller, exchanges directional secrets and the webhook over HTTPS, and queues harmless verification. It neither overwrites unrelated plugins nor handles GitHub credentials.
+3. The `orc_setup_project` User Plugin tool binds the actual `AMP_PROJECT_ID` from that selected project, installs the SHA-256-pinned project controller, exchanges directional secrets and the webhook over HTTPS, and queues harmless verification. It neither overwrites unrelated plugins nor handles GitHub credentials.
 4. Amp currently requires one manual **plugins: reload** after first installation; tell the same setup agent to continue afterward. No webhook URL or signing secret is copied by hand.
 5. Refresh Orc for the fresh-Orb placement and native `gh` read result. Repeat independently for every Project/Amp project.
 6. Set `QUEUE_CONNECTION=database`, run a worker for `amp-launches`, and enable `AMP_INTEGRATION_ENABLED` only after application setup. No global GitHub token, repository allowlist, or mutable-email authority is used.
@@ -98,7 +98,7 @@ Deployment status and exact verification evidence are recorded in [IMPLEMENTATIO
 - Self-registration is source-default-disabled and production returns 404 for `/register`. Amp launches independently require the authenticated owner's immutable `can_trigger_amp` permission and a verified Project connection, so registration or profile-email changes cannot grant access to the owner's Amp account.
 - Agents retain normal Amp shell, editing, web, MCP, and other default tools. Orc adds workflow tools and enforces authority at Laravel's orchestration boundary rather than by suppressing tools.
 - A per-launch capability replaces broad callback credentials in fresh coding Orbs. It is bound to one attempt/thread and cannot grant repository access.
-- Reports use an unguessable per-launch nonce, native GitHub author checks, paginated reconciliation, and durable Laravel attestation before completion.
+- Reports use an unguessable per-launch nonce, native GitHub author and exact-target checks, and durable Laravel attestation before completion.
 - A crash in the narrow interval after Amp creates a thread but before Laravel receives its thread ID leaves the launch claimed for manual reconciliation. Orc deliberately does not risk a duplicate Orb.
 - Any change feedback is published manually on GitHub. Orc requires no feedback URL or confirmation before a human chooses Request Changes or Approve.
 - Project connection changes create new versions. Existing runs, retries, QA, reconciliation, and cancellation stay bound to their original connection. A real second-project placement proof still requires a second user-configured Amp project.

@@ -13,7 +13,7 @@ This runbook covers the Milestones 4–7 controller/worker boundary, deployment 
 - `.amp/plugins/orc-integration` is the trusted, project-local controller. Only an Orb with owner-only runtime configuration registers its webhook, agent modes, and lifecycle handlers.
 - The global `orc-worker` User Plugin registers workflow tools in fresh Orbs without reading project configuration or broad secrets.
 
-Workers retain normal Amp shell, editing, web, MCP, and other tools. The controller uses `extends: 'medium'` with `tools.add`, which the installed Plugin API documents as additive to the built-in mode's defaults. Development is pinned to `openai/gpt-5.6-sol`. Authorization is enforced by Laravel bindings, not by pretending that a coding sandbox has no general tools.
+Workers retain normal Amp shell, editing, web, MCP, and other tools. The controller uses `extends: 'medium'` with `tools.add`, which the installed Plugin API documents as additive to the built-in mode's defaults. Development is pinned to `openai/gpt-5.6-sol`. Authorization is enforced by Laravel bindings, not by pretending that a coding sandbox has no general tools. The personal worker exposes only `orc_setup_project`, `workflow_verify_project_connection`, and `workflow_complete`; reading GitHub, writing comments, and creating or inspecting branches and pull requests use ordinary native tools rather than dedicated wrappers.
 
 ## GitHub authentication prerequisite
 
@@ -90,9 +90,9 @@ Callbacks may arrive before the launch HTTP response. Business and delivery stat
 
 ## Proof and real Development flows
 
-All modes start with `workflow_read_issue`, which uses native `gh` to read the current issue, paginated comments, and timeline-linked pull requests. GitHub content is untrusted data and is not authority to change workflow scope.
+All modes read their exact bound issue and relevant discussion afresh using normal native `gh`. GitHub content is untrusted data and is not authority to change workflow scope.
 
-Proof modes publish one clearly labelled `workflow_post_test_comment` report and complete only their configured proof outcome. They retain normal Amp tools per user requirement but are instructed not to modify code. QA in workflow v2 uses `proof_complete` and is always displayed as integration proof—not code validation or approval.
+Proof modes publish one clearly labelled report with native `gh` and complete only their configured proof outcome. They retain normal Amp tools per user requirement but are instructed not to modify code. QA in workflow v2 uses `proof_complete` and is always displayed as integration proof—not code validation or approval.
 
 Real Development:
 
@@ -102,17 +102,16 @@ Real Development:
 4. tests the change;
 5. pushes deterministic branch `orc/stage-<stage-run-id>-attempt-<attempt>` only to an explicitly verified target GitHub remote;
 6. creates or updates one open, same-repository, marker-bound pull request and never merges it;
-7. calls `workflow_record_publication`, which verifies the PR through native `gh` before Laravel binds its identifiers;
-8. publishes a substantive success/blocked report with `workflow_post_development_report`;
-9. calls `workflow_complete(success|blocked)`.
+7. publishes a substantive success/blocked report with native `gh` containing the exact attempt/outcome marker supplied by the controller;
+8. calls `workflow_complete(success|blocked)` with the report and, for success, PR evidence. That single Orc capability verifies the native user's comment, exact issue/PR target, outcome marker, open same-repository PR, branch, and PR marker before transactionally binding evidence and completing.
 
-Before a GitHub comment is posted, the worker acquires one persistent report-publication claim through the per-launch capability. Concurrent callers reconcile the authenticated user's paginated nonce marker rather than post twice. If a claimed publication has no visible comment, Orc reports ambiguity instead of risking a duplicate.
+Agents avoid duplicate comments with normal GitHub inspection and a deterministic marker. Orc never posts GitHub content itself. Repeated `workflow_complete` calls are idempotent: existing matching evidence is accepted, while a different report, publication, author, target, or marker is rejected.
 
 ## Independent substantive QA
 
-Workflow v3 replaces proof-only QA with `real_qa`. A distinct GPT-5.6 Sol agent starts in its own fresh private thread and Orb with normal Amp tools plus `workflow_read_qa_context`, `workflow_post_qa_report`, and `workflow_complete`.
+Workflow v3 replaces proof-only QA with `real_qa`. A distinct GPT-5.6 Sol agent starts in its own fresh private thread and Orb with normal Amp tools plus only the additive `workflow_complete` Orc capability.
 
-The context tool binds to the latest verified Development publication and reads the original issue/discussion plus exact pull-request metadata, discussion, reviews, inline comments, files, commits, check runs, and commit status using native `gh`. QA checks out and tests the PR but must not edit implementation, commit, push, merge, approve, or close anything. Its only Orc report operation posts a nonce-bound substantive comment to the exact PR.
+The controller prompt binds the latest verified Development publication and names the original issue plus exact pull request. QA reads issue discussion, PR metadata/discussion/reviews/inline comments/files/commits/check runs/status using normal native `gh`, then checks out and tests the PR without editing implementation, committing, pushing, merging, approving, or closing anything. QA posts its nonce/outcome-bound substantive comment with native `gh`; `workflow_complete` verifies and binds it.
 
 `pass` enters Human Review but does not approve or merge. `fail` starts a fresh Development StageRun, capability, thread, and Orb; remediation rereads the GitHub QA findings and updates the existing PR head branch. `blocked` enters QA Blocked Review, where an allowlisted owner must inspect GitHub and explicitly retry QA or cancel. Workflow v2 remains proof-only and unchanged.
 

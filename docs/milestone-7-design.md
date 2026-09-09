@@ -52,11 +52,11 @@ Substantive QA reports are issue comments on the exact bound pull request, use a
 
 ## Independent QA behavior
 
-The QA agent uses GPT-5.6 Sol with the normal Amp default tools plus stage-bound workflow tools. It uses only the user's existing native Orb GitHub/git authentication; Orc never provisions, copies, injects, repairs, or broadens credentials.
+The QA agent uses GPT-5.6 Sol with the normal Amp default tools plus only the stage-bound `workflow_complete` capability. It uses only the user's existing native Orb GitHub/git authentication; Orc never provisions, copies, injects, repairs, or broadens credentials.
 
 QA must:
 
-1. call the QA context tool and verify the exact bound PR;
+1. use normal native `gh` to read and verify the exact bound PR plus issue, discussion, reviews, inline comments, files, commits, and CI;
 2. fetch/check out that PR for inspection without pushing;
 3. assess every acceptance criterion and relevant prior QA finding independently;
 4. run checks appropriate to the change and inspect existing CI evidence;
@@ -82,7 +82,7 @@ Human `request_changes` follows the same remediation path without requiring a fe
 - The trusted controller keeps global directional signing secrets; no global secret enters a coding or QA Orb.
 - Each worker receives only its encrypted-at-rest per-launch capability, bound to the exact launch, current attempt, thread, mode, configured outcomes, report target, and publication rules.
 - The central `WorkflowEngine` remains the sole mutation boundary and locks launch/run/attempt rows.
-- Report publication uses a persistent first-writer claim and marker/author reconciliation; retries never knowingly duplicate a report.
+- Report publication uses normal native `gh` with a deterministic marker; the agent checks for that marker before posting, and completion verifies the marker, author, and exact target.
 - A QA report URL must identify an issue comment on the exact bound PR and match its numeric comment ID.
 - A QA callback cannot attest an issue report, another PR, another repository, another thread, a stale attempt, or a report kind different from its outcome.
 - Duplicate callback event IDs return the stored response; an event ID reused with different bytes is rejected.
@@ -109,7 +109,7 @@ Automated coverage must prove:
 - duplicate reports/completions and racing outcomes are idempotent or rejected safely;
 - QA fail creates a fresh Development launch with monotonic numbering, a distinct capability, and the existing PR branch;
 - QA-blocked retry creates a fresh QA launch and thread slot;
-- worker reads issue/PR/reviews/comments/files/commits/checks/status via native `gh`, publishes only to the bound PR, and never passes a GitHub token itself;
+- the agent reads issue/PR/reviews/comments/files/commits/checks/status via normal native `gh`, publishes only to the bound PR, and never passes a GitHub token to Orc;
 - controller agents extend the normal default mode with additive workflow tools and create `executor: "orb"` threads;
 - representative running QA, failed-QA remediation, blocked QA, and Human Review pages render truthful states.
 

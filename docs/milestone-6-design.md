@@ -57,13 +57,13 @@ The launch payload carries the mode, allowed outcomes, issue identifiers, attemp
 
 1. Laravel creates one durable launch for the active Development `StageRun` and uses the existing claim-before-create protocol.
 2. The controller creates exactly one fresh private thread with `executor: "orb"` and binds it before prompting.
-3. `workflow_read_issue` retrieves the issue body, current discussion, existing attempt report, and linked pull-request references from GitHub at call time. Returned GitHub content is explicitly untrusted data, not instructions outside the authorized issue task.
+3. The agent uses normal native `gh` to retrieve the issue body, current discussion, existing attempt report, and linked pull-request references from GitHub at call time. Returned GitHub content is explicitly untrusted data, not instructions outside the authorized issue task.
 4. The agent verifies that its checkout is the bound GitHub repository, fetches that repository's current default branch, and bases the deterministic attempt branch on it before editing. A fresh Orb may initially have an Amp-hosted project `origin`; that remote must not be mistaken for the target GitHub remote.
 5. The agent retains its normal Amp shell, edit, web, MCP, and related tools for repository inspection, implementation, and tests.
 6. Native Orb `git` and `gh` authentication performs repository and GitHub operations. Orc neither supplies nor repairs access; missing access is a prerequisite blocker.
 7. The agent uses the deterministic branch `orc/stage-<stage-run-id>-attempt-<attempt>`, pushes it only to an explicitly verified target GitHub remote, and creates or updates one marker-bound PR. It never merges, force-pushes, changes the issue state, or targets another repository.
-8. `workflow_post_development_report` publishes a substantive issue comment linking the PR and recording check status. A nonce marker makes it idempotent.
-9. `workflow_complete(success)` requires the bound PR and report. `workflow_complete(blocked)` requires a substantive blocked report and no fabricated success evidence.
+8. The agent publishes a substantive issue comment with normal native `gh`, linking the PR and recording check status. A nonce/outcome marker binds it to the attempt.
+9. `workflow_complete(success)` verifies the supplied report and open same-repository PR evidence. `workflow_complete(blocked)` verifies a substantive blocked report and no fabricated success evidence.
 10. Laravel transactionally validates the current attempt, exact thread, bounded outcome, same-repository PR/report URLs, and mode-specific evidence before transitioning.
 
 An agent may update an existing PR only when it is explicitly linked to the same issue and bound to the current deterministic branch/attempt marker. It never merges a PR.
@@ -74,7 +74,7 @@ The user explicitly requires normal Amp tools rather than a restricted sandbox. 
 
 That full toolset means no broad Laravel↔Amp signing secret may enter the coding Orb through environment, files, prompt, or worker closure. The trusted controller alone reads those secrets from gitignored owner-only local configuration. Laravel instead issues an encrypted-at-rest random capability for each `AmpLaunch`; its public endpoint accepts that capability only for the exact bound thread, active attempt, allowed action/outcome, and authorized run. Completion, report, and PR identifiers still pass through the central transactional engine with persistent event deduplication.
 
-The User Plugin exposes `workflow_read_issue`, `workflow_record_publication`, `workflow_post_development_report`, proof reporting, and `workflow_complete`. It has no GitHub credential configuration. Its GitHub calls use native `gh`, while ordinary agent Git uses native Orb Git authentication. Missing native access is reported as a prerequisite and is never “fixed” by Orc.
+The User Plugin exposes only project setup, connection verification, and `workflow_complete` capabilities. Issue/PR reads, report comments, branch publication, and PR creation use normal native Orb `gh`/Git directly. `workflow_complete` independently verifies and binds the resulting report/PR evidence before mutating Orc. The plugin has no GitHub credential configuration; missing native access is a prerequisite and is never “fixed” by Orc.
 
 ## Idempotency and concurrency
 
