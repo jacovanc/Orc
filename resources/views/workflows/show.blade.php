@@ -252,7 +252,7 @@
         <section class="mt-6 rounded-3xl border border-red-400/20 bg-red-400/[0.06] p-7 sm:p-9">
             <p class="font-mono text-xs uppercase tracking-[0.16em] text-red-300">Workflow failed</p>
             <h2 class="mt-3 text-2xl font-semibold text-white">Agent launch or execution could not complete safely</h2>
-            <p class="mt-2 text-sm text-zinc-500">No transition was taken. Inspect the immutable attempt and event history below.</p>
+            <p class="mt-2 text-sm text-zinc-400">No transition was taken. Inspect the immutable attempt and event history below.</p>
         </section>
     @elseif ($run->status === \App\Domain\Workflow\WorkflowStatus::Paused)
         <section class="mt-6 rounded-3xl border border-sky-300/20 bg-sky-300/[0.06] p-7 sm:p-9">
@@ -272,7 +272,7 @@
                 <div class="border-b border-white/[0.07] p-6 sm:p-7 lg:border-b-0 lg:border-r">
                     <div class="eyebrow"><span></span> Manual controls</div>
                     <h2 class="mt-4 text-xl font-semibold text-white">Recover or redirect this run</h2>
-                    <p class="mt-2 text-sm leading-6 text-zinc-500">Use these controls to recover from an accidental decision or deliberately skip a stage. Orc never rewrites completed attempts.</p>
+                    <p class="mt-2 text-sm leading-6 text-zinc-400">Use these controls to recover from an accidental decision or deliberately skip a stage. Orc never rewrites completed attempts.</p>
 
                     @if ($run->status === \App\Domain\Workflow\WorkflowStatus::Running && $controlAttempt->stage->type === \App\Domain\Workflow\StageType::Agent)
                         <form class="mt-5" method="POST" action="{{ route('workflows.attempts.pause', [$run, $controlAttempt]) }}" onsubmit="return confirm('Stop this agent attempt and pause the workflow?')">
@@ -294,7 +294,7 @@
                                 </option>
                             @endforeach
                         </select>
-                        <p class="field-help">Agent stages start a fresh thread and Orb and may spend tokens. Human Review waits for your decision. To finish, move to Human Review and use Approve.</p>
+                        <p class="mt-2 text-xs leading-5 text-zinc-400">Agent stages start a fresh thread and Orb and may spend tokens. Human Review waits for your decision. To finish, move to Human Review and use Approve.</p>
                         <button class="button-primary mt-5" type="submit">
                             {{ $run->status === \App\Domain\Workflow\WorkflowStatus::Running ? 'Stop & move' : 'Resume at stage' }}
                         </button>

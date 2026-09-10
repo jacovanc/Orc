@@ -8,6 +8,25 @@ export default {
         './storage/framework/views/*.php',
         './resources/views/**/*.blade.php',
     ],
+    // Status classes are assembled from enum values in Blade and therefore
+    // cannot be discovered statically by Tailwind's content scanner.
+    safelist: [
+        'status-running',
+        'status-paused',
+        'status-completed',
+        'status-pending',
+        'status-setup_pending',
+        'status-claimed',
+        'status-delivering',
+        'status-delivered',
+        'status-launched',
+        'status-ambiguous',
+        'status-cancelled',
+        'status-failed',
+        'status-expired',
+        'status-revoked',
+        'status-waiting',
+    ],
 
     theme: {
         extend: {
