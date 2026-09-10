@@ -45,7 +45,7 @@ class MilestoneSevenTest extends TestCase
             ->orderBy('version')
             ->get();
 
-        $this->assertSame([1, 2, 3], $definitions->pluck('version')->all());
+        $this->assertSame([1, 2, 3, 4], $definitions->pluck('version')->all());
         $this->assertSame(['development', 'qa', 'human_review', 'done'], $definitions[0]->stages->pluck('key')->all());
         $this->assertSame(
             ['development', 'qa_proof', 'development_blocked', 'human_review', 'done'],

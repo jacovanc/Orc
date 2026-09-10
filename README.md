@@ -2,7 +2,7 @@
 
 Orc is a Laravel-native workflow orchestrator for software delivery. It coordinates agent stages, QA loops, and human approval while keeping requirements, code, discussion, feedback, and reports in GitHub.
 
-Milestones 1–7 and personal Projects are implemented as an authenticated, server-rendered application with durable Laravel↔Amp orchestration, real Development, independent substantive QA, and verified per-Amp-project routing. Read the [domain and architecture](docs/architecture.md), [Amp integration runbook](docs/amp-integration.md), and [Project routing design](docs/project-routing-design.md) before extending the workflow engine.
+Milestones 1–7, personal Projects, and post-approval Merge are implemented as an authenticated, server-rendered application with durable Laravel↔Amp orchestration, real Development, independent substantive QA, verified per-Amp-project routing, and policy-bound merging. Read the [domain and architecture](docs/architecture.md), [Amp integration runbook](docs/amp-integration.md), and [Merge design](docs/milestone-merge-design.md) before extending the workflow engine.
 
 Before allowing an administrator to start Amp-backed workflows, complete the
 [operator access onboarding checklist](docs/operator-access-checklist.md). The next architecture phase is specified in the [Project management and Amp routing design](docs/project-routing-design.md); sequencing and explicitly deferred work are in the [roadmap](docs/future-roadmap.md).
@@ -10,13 +10,14 @@ Before allowing an administrator to start Amp-backed workflows, complete the
 ## What is included
 
 - Versioned, immutable workflow definitions with agent, human, and terminal stages.
-- Seeded Development → QA → Human Review → Done graph, including QA and change-request loops.
+- Seeded immutable workflow versions through Development → QA → Human Review → Merge → Done, including remediation, blocked, and bounded conflict-review loops.
 - A central transactional `WorkflowEngine` with row locks, expected-attempt checks, idempotent duplicate completions, monotonic attempt numbers, and a database-enforced single-active-attempt slot.
 - Append-only workflow events and stable historical stage attempts.
 - Authenticated list, manual start, detail, status, stage graph, attempt table, event timeline, GitHub links, human actions, cancellation, and audited stop/stage-override controls.
 - Durable queued Amp launches with bounded retries, stable idempotency keys, explicit ambiguous outcomes, persistent callback deduplication, and separate delivery/business state.
 - A trusted project-local Amp controller plus a secretless global User Plugin worker. Agents retain normal tools and gain stage-bound workflow tools in one fresh private thread and Orb per attempt.
 - Independent QA bound to the exact Development pull request, including fresh issue/PR/review/CI reads, substantive PR reports, fail-to-remediation loops, and a human gate for blocked verdicts.
+- A fresh Merge agent after human approval, with exact reviewed-head and native GitHub merge evidence, one material-conflict QA/Human review cycle, and an explicit blocked gate.
 - Explicit agent simulation controls when the integration is disabled, so orchestration can still be exercised without Amp.
 - Laravel Breeze authentication and owner-scoped workflow access.
 - Personal Projects with a canonical GitHub repository, explicit Amp project identity, immutable versioned controller connections, per-project run/start/settings pages, and an all-project run overview.
@@ -88,13 +89,13 @@ Laravel Cloud needs a database because workflow state and authentication are per
 - build command: `composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader && npm ci --audit false && npm run build`
 - deploy command: `php artisan migrate --force && php artisan db:seed --force`
 
-The seed is idempotent and preserves immutable workflows v1/v2 while creating independent-QA workflow v3. Production also needs a supervised `php artisan queue:work database --queue=amp-launches` process. Do not put Amp credentials into source control; GitHub access remains native user-configured Orb state, never Orc configuration.
+The seed is idempotent and preserves immutable workflows v1–v3 while creating Merge workflow v4. Production also needs a supervised `php artisan queue:work database --queue=amp-launches` process. Do not put Amp credentials into source control; GitHub access remains native user-configured Orb state, never Orc configuration.
 
 Deployment status and exact verification evidence are recorded in [IMPLEMENTATION.md](IMPLEMENTATION.md).
 
 ## Current limitations
 
-- Workflow definition v1 retains the harmless Development/QA integration proof. Definition v2 retains live-proven real Development with explicitly proof-only QA. Definition v3 adds independent substantive QA with `pass|fail|blocked` and remediation/operator loops.
+- Workflow definition v1 retains the harmless Development/QA integration proof. Definition v2 retains live-proven real Development with explicitly proof-only QA. Definition v3 adds independent substantive QA with remediation/operator loops. Definition v4 adds policy-bound Merge after Human Review; older verified controller connections must be re-paired as protocol 2 before v4 is available.
 - Self-registration is source-default-disabled and production returns 404 for `/register`. Amp launches independently require the authenticated owner's immutable `can_trigger_amp` permission and a verified Project connection, so registration or profile-email changes cannot grant access to the owner's Amp account.
 - Agents retain normal Amp shell, editing, web, MCP, and other default tools. Orc adds workflow tools and enforces authority at Laravel's orchestration boundary rather than by suppressing tools.
 - A per-launch capability replaces broad callback credentials in fresh coding Orbs. It is bound to one attempt/thread and cannot grant repository access.
@@ -106,6 +107,7 @@ Deployment status and exact verification evidence are recorded in [IMPLEMENTATIO
 - There is no workflow editor. Definitions are seeded and versioned in code/database.
 - Real Development has a completed controlled public-repository acceptance on documentation issue `jacovanc/Orc#2`; Orc left its pull request open, the user merged it directly on GitHub, then separately approved the Orc Human Review. This does not prove private-repository operation.
 - QA has normal tools for inspection/testing but no Orc publication capability and is instructed never to change/push implementation. Native repository permissions are user-owned, so this is a workflow rule rather than a fake sandbox boundary.
+- Merge has not yet been exercised against a live user-authorized pull request. No PR was merged merely to test this release.
 
 ## Design rules for later phases
 

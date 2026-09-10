@@ -30,6 +30,7 @@ class AmpIntegrationController extends Controller
                 'stage.report_claimed',
                 'stage.reported',
                 'stage.published',
+                'stage.merge_verified',
                 'stage.completed',
                 'stage.failed',
             ])],
@@ -41,10 +42,12 @@ class AmpIntegrationController extends Controller
             'outcome' => ['nullable', 'string', 'max:64'],
             'github_report_url' => ['nullable', 'url:https', 'max:2048'],
             'github_report_comment_id' => ['nullable', 'integer', 'min:1'],
-            'github_report_kind' => ['nullable', Rule::in(['proof', 'success', 'pass', 'fail', 'blocked'])],
+            'github_report_kind' => ['nullable', Rule::in(['proof', 'success', 'pass', 'fail', 'blocked', 'merged', 'requires_review'])],
             'github_branch' => ['nullable', 'string', 'max:255'],
             'github_pull_request_number' => ['nullable', 'integer', 'min:1'],
             'github_pull_request_url' => ['nullable', 'url:https', 'max:2048'],
+            'github_pull_request_head_sha' => ['nullable', 'string', 'regex:/^[a-f0-9]{40}$/i'],
+            'github_merge_commit_sha' => ['nullable', 'string', 'regex:/^[a-f0-9]{40}$/i'],
             'report_nonce' => ['nullable', 'string', 'size:64'],
             'reason' => ['nullable', 'string', 'max:500'],
             'amp_project_id' => ['required', 'string', 'max:100'],
@@ -115,6 +118,7 @@ class AmpIntegrationController extends Controller
             'connection_id' => ['required', 'uuid'],
             'amp_project_id' => ['required', 'string', 'max:100'],
             'launch_webhook_url' => ['required', 'url:https', 'max:2048'],
+            'controller_protocol_version' => ['required', 'integer', 'in:2'],
         ]);
 
         if ($payload['event_id'] !== $request->attributes->get('amp_event_id')) {
@@ -144,16 +148,18 @@ class AmpIntegrationController extends Controller
         $payload = $request->validate([
             'schema_version' => ['required', 'integer', 'in:1'],
             'event_id' => ['required', 'uuid'],
-            'action' => ['required', Rule::in(['context', 'report_claim', 'report', 'publication', 'complete', 'fail'])],
+            'action' => ['required', Rule::in(['context', 'report_claim', 'report', 'publication', 'merge', 'complete', 'fail'])],
             'occurred_at' => ['required', 'date'],
             'thread_id' => ['required', 'string', 'regex:/^T-[A-Za-z0-9-]+$/'],
             'outcome' => ['nullable', 'string', 'max:64'],
             'github_report_url' => ['nullable', 'url:https', 'max:2048'],
             'github_report_comment_id' => ['nullable', 'integer', 'min:1'],
-            'github_report_kind' => ['nullable', Rule::in(['proof', 'success', 'pass', 'fail', 'blocked'])],
+            'github_report_kind' => ['nullable', Rule::in(['proof', 'success', 'pass', 'fail', 'blocked', 'merged', 'requires_review'])],
             'github_branch' => ['nullable', 'string', 'max:255'],
             'github_pull_request_number' => ['nullable', 'integer', 'min:1'],
             'github_pull_request_url' => ['nullable', 'url:https', 'max:2048'],
+            'github_pull_request_head_sha' => ['nullable', 'string', 'regex:/^[a-f0-9]{40}$/i'],
+            'github_merge_commit_sha' => ['nullable', 'string', 'regex:/^[a-f0-9]{40}$/i'],
             'reason' => ['nullable', 'string', 'max:500'],
             'amp_project_id' => ['required', 'string', 'max:100'],
         ]);
@@ -220,6 +226,7 @@ class AmpIntegrationController extends Controller
             'amp_project_id' => ['required', 'string', 'max:100'],
             'launch_webhook_url' => ['nullable', 'required_if:action,complete', 'url:https', 'max:2048'],
             'controller_source_sha256' => ['nullable', 'required_if:action,complete', 'string', 'size:64'],
+            'controller_protocol_version' => ['nullable', 'required_if:action,complete', 'integer', 'in:2'],
         ]);
 
         try {

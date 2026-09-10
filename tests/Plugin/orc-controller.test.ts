@@ -17,7 +17,7 @@ function launch(overrides: Record<string, unknown> = {}) {
 		project_id: 1,
 		connection_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		amp_project_id: 'amp-project-test',
-		controller_key: 'orc-stage-launch-v11-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+		controller_key: 'orc-stage-launch-v12-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		callback_url: 'https://orc.test/api/integrations/amp/connections/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		event_id: '11111111-1111-4111-8111-111111111111',
 		idempotency_key: '22222222-2222-4222-8222-222222222222',
@@ -34,12 +34,13 @@ function launch(overrides: Record<string, unknown> = {}) {
 		stage_capability_url: 'https://orc.test/api/integrations/amp/stage-capability',
 		stage_capability_token: 'stage-capability-token-that-is-long-enough',
 		expected_branch: 'orc/stage-41-attempt-1',
+		merge_review_cycles: 0,
 		allowed_outcomes: ['success', 'blocked'],
 		...overrides,
 	}
 }
 
-async function controllerHarness(testName: string, holdResponses = false) {
+async function controllerHarness(testName: string, holdResponses = false, controllerProtocolVersion: number | null = 2) {
 	process.env.AMP_PROJECT_ID = 'amp-project-test'
 	const root = `/tmp/orc-controller-${testName}`
 	rmSync(root, { recursive: true, force: true })
@@ -47,6 +48,7 @@ async function controllerHarness(testName: string, holdResponses = false) {
 	writeFileSync(`${root}/.amp/runtime/orc-plugin.json`, JSON.stringify({
 		connectionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		ampProjectId: 'amp-project-test',
+		...(controllerProtocolVersion === null ? {} : { controllerProtocolVersion }),
 		launchSigningSecret: 'launch-secret',
 		callbackSigningSecret: 'callback-secret',
 	}))
@@ -150,6 +152,13 @@ async function controllerHarness(testName: string, holdResponses = false) {
 }
 
 describe('Orc controller agent configuration', () => {
+	test('keeps historical protocol-one runtimes on their immutable v11 registration', async () => {
+		const harness = await controllerHarness('protocol-one-compatibility', false, null)
+
+		expect(harness.webhookKey()).toBe('orc-stage-launch-v11-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+		expect(harness.webhookKeys()).toEqual(['orc-stage-launch-v11-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'])
+	})
+
 	test('publishes the current durable webhook to its signed connection callback without exposing secrets', async () => {
 		process.env.AMP_PROJECT_ID = 'amp-project-test'
 		const root = '/tmp/orc-controller-webhook-refresh'
@@ -158,6 +167,7 @@ describe('Orc controller agent configuration', () => {
 		writeFileSync(`${root}/.amp/runtime/orc-plugin.json`, JSON.stringify({
 			connectionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 			ampProjectId: 'amp-project-test',
+			controllerProtocolVersion: 2,
 			launchSigningSecret: 'launch-secret',
 			callbackSigningSecret: 'callback-secret',
 			connectionCallbackUrl: 'https://orc.test/api/integrations/amp/connections/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -190,6 +200,7 @@ describe('Orc controller agent configuration', () => {
 		expect(payload.type).toBe('controller.webhook_refreshed')
 		expect(payload.amp_project_id).toBe('amp-project-test')
 		expect(payload.launch_webhook_url).toBe('https://amp.test/current-durable-capability')
+		expect(payload.controller_protocol_version).toBe(2)
 		expect(request.body).not.toContain('launch-secret')
 		expect(request.body).not.toContain('callback-secret')
 		expect(request.headers.get('x-orc-event-id')).toBe(payload.event_id)
@@ -208,6 +219,7 @@ describe('Orc controller agent configuration', () => {
 		writeFileSync(`${root}/.amp/runtime/orc-plugin.json`, JSON.stringify({
 			connectionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 			ampProjectId: 'amp-project-test',
+			controllerProtocolVersion: 2,
 			launchSigningSecret: 'launch-secret',
 			callbackSigningSecret: 'callback-secret',
 		}))
@@ -227,12 +239,13 @@ describe('Orc controller agent configuration', () => {
 		} as never)
 		await new Promise((resolve) => setTimeout(resolve, 0))
 
-		expect(agentConfigs).toHaveLength(4)
+		expect(agentConfigs).toHaveLength(5)
 		expect(modes.map((mode) => mode.key)).toEqual([
 			'orc-proof-agent',
 			'orc-development-agent',
 			'orc-qa-agent',
 			'orc-connection-verifier',
+			'orc-merge-agent',
 		])
 		for (const config of agentConfigs) {
 			expect(config.extends).toBe('medium')
@@ -249,7 +262,11 @@ describe('Orc controller agent configuration', () => {
 		expect(agentConfigs[2].model).toBe('openai/gpt-5.6-sol')
 		expect(agentConfigs[2].instructions).toContain('Do not change implementation files')
 		expect(agentConfigs[2].instructions).toContain('normal native gh')
-		expect(agentConfigs[3].tools.add).toEqual(['workflow_verify_project_connection'])
+		expect(agentConfigs[3].tools.add).toEqual(['workflow_complete'])
+		expect(agentConfigs[3].model).toBe('openai/gpt-5.6-sol')
+		expect(agentConfigs[3].instructions).toContain('Never bypass branch protection')
+		expect(agentConfigs[3].instructions).toContain('gh merge behavior')
+		expect(agentConfigs[4].tools.add).toEqual(['workflow_verify_project_connection'])
 		rmSync(root, { recursive: true, force: true })
 	})
 
@@ -269,8 +286,8 @@ describe('Orc controller agent configuration', () => {
 
 	test('marks a claimed launch without a durable thread ambiguous instead of creating a duplicate Orb', async () => {
 		const harness = await controllerHarness('claimed-without-thread')
-		expect(harness.webhookKey()).toBe('orc-stage-launch-v11-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
-		expect(harness.webhookKeys()).toEqual(['orc-stage-launch-v11-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'])
+		expect(harness.webhookKey()).toBe('orc-stage-launch-v12-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+		expect(harness.webhookKeys()).toEqual(['orc-stage-launch-v12-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'])
 		const callbackTypes: string[] = []
 		const controllerThreads: unknown[] = []
 		globalThis.fetch = (async (_input, init) => {

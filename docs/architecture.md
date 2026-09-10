@@ -1,4 +1,4 @@
-# Orc Milestones 1–7: Domain and Architecture
+# Orc Milestones 1–7 and Merge: Domain and Architecture
 
 This document defines the domain and the integration boundaries before each implementation phase is introduced.
 
@@ -9,7 +9,7 @@ Orc is an orchestration system, not a second source of truth for software work.
 - **GitHub owns** requirements, source code, implementation discussion, review discussion, and reports.
 - **Laravel stores** GitHub identifiers/URLs and the minimum workflow state required to orchestrate work.
 - Orc does not persist private prompts, issue bodies, generated reports, review feedback, or hidden development context.
-- Workflow v1 retains the Milestones 4–5 proof behavior. Workflow v2 uses a real Development agent followed by QA integration proof and an explicit human release gate. Workflow v3 adds independent substantive QA with remediation and blocked-operator loops. Simulation remains a local-development fallback only when integration is disabled.
+- Workflow v1 retains the Milestones 4–5 proof behavior. Workflow v2 uses a real Development agent followed by QA integration proof and an explicit human release gate. Workflow v3 adds independent substantive QA with remediation and blocked-operator loops. Workflow v4 adds a fresh policy-bound Merge agent after Human Review. Simulation remains a local-development fallback only when integration is disabled.
 
 ## Domain model
 
@@ -49,7 +49,7 @@ An append-only audit record of orchestration facts. Events contain structured id
 
 ### Manual run control
 
-An owner may pause the current agent attempt or manually move a running, paused, or failed run to another non-terminal stage in the same immutable definition. This is an audited run-level override, not an edit to the definition or history: the current attempt is closed, any bound Amp thread receives the existing signed cancellation command, and a new monotonically numbered attempt is created at the selected stage. Completed and cancelled runs remain final, and Done still requires the normal human approval transition.
+An owner may pause the current agent attempt or manually move a running, paused, or failed run to another non-terminal stage in the same immutable definition. This is an audited run-level override, not an edit to the definition or history: the current attempt is closed, any bound Amp thread receives the existing signed cancellation command, and a new monotonically numbered attempt is created at the selected stage. Completed and cancelled runs remain final; workflow v4 reaches Done only through verified Merge completion after the human approval transition.
 
 Manual movement is addressed to the expected attempt ID so duplicate submissions are idempotent and racing agent callbacks become stale. Moving into an agent stage rechecks the owner's immutable Amp permission and the run's original verified connection. Moving directly to Human Review is allowed for recovery or deliberate stage skipping, but the UI labels it as a manual override rather than claiming QA passed. Orc stores only the actor and structured from/to/attempt identifiers in append-only events; it does not invent or store review feedback.
 
@@ -63,7 +63,7 @@ Human Review (human) --request_changes> Development (agent)
 Human Review (human) --approve--------> Done (terminal)
 ```
 
-Workflow v2 and v3 are separately frozen definitions documented in [Milestone 6](milestone-6-design.md) and [Milestone 7](milestone-7-design.md). Version 3 routes Development success to substantive QA; QA pass to Human Review, fail to a fresh Development attempt, and blocked to an explicit human QA-blocked gate.
+Workflow v2 and v3 are separately frozen definitions documented in [Milestone 6](milestone-6-design.md) and [Milestone 7](milestone-7-design.md). Version 3 routes Development success to substantive QA; QA pass to Human Review, fail to a fresh Development attempt, and blocked to an explicit human QA-blocked gate. [Workflow v4](milestone-merge-design.md) routes approval to Merge; verified merge reaches Done, one material conflict resolution returns through QA/Human Review, and blocked or later material conflicts stop at Merge Blocked Review.
 
 ## State machine invariants
 
@@ -75,7 +75,7 @@ Workflow v2 and v3 are separately frozen definitions documented in [Milestone 6]
 6. Outcomes must exist as transitions on the attempt's stage. Entering a terminal stage creates an immediately closed attempt, then completes the workflow.
 7. Attempt numbers are allocated under the run lock from the current (and therefore highest) attempt, so loops retain a monotonically ordered history.
 8. Completed and cancelled workflows cannot transition. Cancellation is idempotent and closes the current active attempt. An audited manual override may recover a failed run without rewriting its failed attempt.
-9. Human actions are accepted only for the current active human attempt and only when permitted by the definition. Approval completes directly; `request_changes` starts one fresh Development attempt whose agent rereads the bound pull request, reviews, inline comments, and discussion from GitHub.
+9. Human actions are accepted only for the current active human attempt and only when permitted by the definition. In v1–v3 approval completes directly; in v4 it starts one fresh Merge attempt. `request_changes` starts one fresh Development attempt whose agent rereads the bound pull request, reviews, inline comments, and discussion from GitHub.
 10. Agent simulation is available only when Amp integration is disabled and is visibly marked as simulation in both the UI and event stream.
 11. Manual pause and stage movement identify the expected attempt, preserve monotonic attempt numbering, reject cross-definition or terminal destinations, and cancel a bound agent thread before queuing any replacement agent attempt.
 
@@ -114,6 +114,8 @@ An explicit `workflow_complete` tool is the normal completion path. A guarded `a
 
 Real QA uses a distinct `real_qa` mode and fresh Orb. It reads the exact prior Development PR, reviews, issue and inline comments, changed files, commits, check runs, and commit status directly from GitHub with normal native tools. Its report must be a comment on that exact PR, and its attested kind must equal `pass`, `fail`, or `blocked`. QA has normal tools but is instructed and scoped not to publish code; Laravel exposes no publication operation for QA. A fail starts a new Development attempt that rereads GitHub and updates the existing PR branch. A blocked result enters a human gate rather than being represented as pass or fail.
 
+Real Merge uses a distinct `real_merge` mode and fresh Orb after v4 Human Review approval. It starts only with a verified Development PR and exact head from the latest passing QA attempt. It rereads live GitHub state and repository policy with normal native tools. Clean or clearly mechanical behavior-preserving conflicts may merge; a first material conflict resolution is pushed but routed through fresh QA/Human Review, and any later or uncertain conflict is blocked. Worker v2 verifies the exact marker-bound PR report and live PR/head/merge-commit evidence before Laravel records `stage.merge_verified` and permits Done.
+
 Cancellation closes the Laravel attempt first, transactionally preventing any late completion. When a thread is already bound, Laravel also queues a signed, retryable command to the trusted controller to call `thread.cancel()` on that exact thread. External GitHub or Git operations already in flight may still finish and must be inspected.
 
 Self-registration is opt-in and source-default-disabled. Independently, workflow start and every human transition into an agent stage require the authenticated owner's immutable `users.can_trigger_amp` permission and the run's verified connection snapshot. New registrations default false, and profile/email changes never alter this permission. Production registration is disabled. Owner/project authorization, exact connection/thread/stage binding, and connection-scoped signatures prevent another account or controller from directing the owner's Amp identity.
@@ -124,4 +126,6 @@ Self-registration is opt-in and source-default-disabled. Independently, workflow
 - No stored review-feedback text. Reviewers publish any feedback directly on GitHub, then choose Approve or Request Changes in Orc without a separate URL or confirmation field.
 - Real Development was live-proven on user-authorized `jacovanc/Orc#2`; public-repository operation is proven, private-repository operation is not claimed.
 - QA in workflow v2 remains orchestration proof only, named `proof_complete`, and is never code validation or approval. New runs may select workflow v3 for independent substantive QA.
+- Workflow v4 requires a verified controller-protocol-2 connection. Historical protocol-1/v11 connections and v1–v3 runs remain valid but are not silently upgraded.
+- Live Merge execution has not been proven because this release did not have authorization to merge a real pull request.
 - Ambiguous launches are surfaced for operator action rather than automatically retried into a possible duplicate.

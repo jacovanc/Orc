@@ -19,6 +19,7 @@
                 <div><dt class="field-label">Amp project identity</dt><dd class="font-mono text-sm text-zinc-300">{{ $connection?->amp_project_id ?? $project->amp_project_id ?? 'Discovered when setup is claimed' }}</dd></div>
                 <div><dt class="field-label">Connection ID</dt><dd class="break-all font-mono text-sm text-zinc-300">{{ $connection?->public_id ?? 'Not configured' }}</dd></div>
                 <div><dt class="field-label">Version</dt><dd class="text-sm text-zinc-300">{{ $connection ? 'v'.$connection->version : '—' }}</dd></div>
+                <div><dt class="field-label">Controller protocol</dt><dd class="text-sm text-zinc-300">{{ $connection ? 'v'.$connection->controller_protocol_version : '—' }}{{ $connection && $connection->controller_protocol_version < 2 ? ' · Merge unavailable' : '' }}</dd></div>
                 <div><dt class="field-label">Last verification</dt><dd class="text-sm text-zinc-300">{{ $connection?->verified_at?->diffForHumans() ?? 'Not verified' }}</dd></div>
                 @if ($connection?->controller_thread_id)
                     <div class="sm:col-span-2"><dt class="field-label">Dedicated controller thread</dt><dd><a class="font-mono text-sm text-orange-300" target="_blank" rel="noopener" href="https://ampcode.com/threads/{{ $connection->controller_thread_id }}">{{ $connection->controller_thread_id }} ↗</a><span class="ml-3 text-xs text-zinc-600">Last acknowledged {{ $connection->controller_last_acknowledged_at?->diffForHumans() ?? 'not yet' }}</span></dd></div>
@@ -28,6 +29,9 @@
                 @if ($connection?->verification_thread_id)<div class="sm:col-span-2"><dt class="field-label">Verification thread</dt><dd><a class="font-mono text-sm text-orange-300" target="_blank" rel="noopener" href="https://ampcode.com/threads/{{ $connection->verification_thread_id }}">{{ $connection->verification_thread_id }} ↗</a></dd></div>@endif
             </dl>
             @if ($connection?->last_error_message)<p class="mt-5 rounded-xl border border-red-400/15 bg-red-400/[0.05] p-4 text-xs text-red-100/70">{{ $connection->last_error_message }}</p>@endif
+            @if ($connection && $connection->controller_protocol_version < 2)
+                <p class="mt-5 rounded-xl border border-amber-300/15 bg-amber-300/[0.05] p-4 text-xs leading-5 text-amber-100/70">This historical controller remains valid for existing workflows, but cannot launch the new Merge stage. Generate and pair a new immutable setup prompt to enable workflow v4; existing runs stay on this connection version.</p>
+            @endif
             @if ($connection && $connection->launch_webhook_url && $connection->status !== 'verified' && auth()->user()->can_trigger_amp)
                 <form class="mt-6" method="POST" action="{{ route('projects.connections.verify', $project) }}">@csrf<button class="button-primary" type="submit">Verify in fresh Orb</button></form>
             @endif

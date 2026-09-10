@@ -28,6 +28,29 @@ class AmpLaunchPayload
             ->first();
         $reusePriorPublication = ($attempt->stage->config['reuse_prior_publication'] ?? false)
             && $priorPullRequest?->github_branch;
+        $approvedQa = $run->stageRuns()
+            ->with('stage')
+            ->where('attempt_number', '<', $attempt->attempt_number)
+            ->where('outcome', 'pass')
+            ->whereNotNull('github_pull_request_head_sha')
+            ->latest('attempt_number')
+            ->get()
+            ->first(fn ($candidate) => ($candidate->stage->config['agent_mode'] ?? null) === 'real_qa');
+        $mergeReviewCycles = $run->stageRuns()
+            ->with('stage')
+            ->where('attempt_number', '<', $attempt->attempt_number)
+            ->where('outcome', 'requires_review')
+            ->get()
+            ->filter(fn ($candidate) => ($candidate->stage->config['agent_mode'] ?? null) === 'real_merge')
+            ->count();
+        $allowedOutcomes = $attempt->stage->outgoingTransitions
+            ->pluck('outcome')
+            ->when(
+                ($attempt->stage->config['agent_mode'] ?? null) === 'real_merge' && $mergeReviewCycles >= 1,
+                fn ($outcomes) => $outcomes->reject(fn ($outcome) => $outcome === 'requires_review'),
+            )
+            ->values()
+            ->all();
 
         return [
             'schema_version' => 1,
@@ -57,10 +80,9 @@ class AmpLaunchPayload
             'prior_github_branch' => $priorPullRequest?->github_branch,
             'prior_pull_request_number' => $priorPullRequest?->github_pull_request_number,
             'prior_pull_request_url' => $priorPullRequest?->github_pull_request_url,
-            'allowed_outcomes' => $attempt->stage->outgoingTransitions
-                ->pluck('outcome')
-                ->values()
-                ->all(),
+            'approved_pull_request_head_sha' => $approvedQa?->github_pull_request_head_sha,
+            'merge_review_cycles' => $mergeReviewCycles,
+            'allowed_outcomes' => $allowedOutcomes,
         ];
     }
 }

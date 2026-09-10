@@ -54,14 +54,17 @@ class WorkflowController extends Controller
 
             return view('workflows.choose-project', compact('projects'));
         }
+        $supportsMerge = ! config('services.amp.enabled')
+            || ($project->currentConnection?->controller_protocol_version ?? 1) >= 2;
         $definitions = WorkflowDefinition::query()
             ->where('is_active', true)
+            ->when(! $supportsMerge, fn ($query) => $query->where('version', '<', 4))
             ->with('stages')
             ->orderBy('name')
             ->orderByDesc('version')
             ->get();
 
-        return view('workflows.create', compact('definitions', 'project'));
+        return view('workflows.create', compact('definitions', 'project', 'supportsMerge'));
     }
 
     public function store(StartWorkflowRequest $request, Project $project): RedirectResponse

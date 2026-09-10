@@ -36,6 +36,18 @@
                 ->sortByDesc('attempt_number')
                 ->first()
             : null;
+        $latestPassingQa = $active
+            ? $run->stageRuns
+                ->where('attempt_number', '<', $active->attempt_number)
+                ->where('outcome', 'pass')
+                ->whereNotNull('github_pull_request_head_sha')
+                ->sortByDesc('attempt_number')
+                ->first(fn ($attempt) => ($attempt->stage->config['agent_mode'] ?? null) === 'real_qa')
+            : null;
+        $mergeReviewCycles = $run->stageRuns
+            ->where('outcome', 'requires_review')
+            ->filter(fn ($attempt) => ($attempt->stage->config['agent_mode'] ?? null) === 'real_merge')
+            ->count();
     @endphp
 
     <div class="flex flex-col justify-between gap-6 lg:flex-row lg:items-start">
@@ -109,13 +121,15 @@
                             @if ($ampEnabled)
                                 @if ($awaitingController)
                                     Orc activated this stage and queued its command, but no agent thread or Orb is running until the dedicated controller acknowledges the launch.
-                                    @if ($activeMode !== 'real_development' && $activeMode !== 'real_qa')
+                                    @if (! in_array($activeMode, ['real_development', 'real_qa', 'real_merge'], true))
                                         If acknowledged, this remains integration proof only—not code validation or approval.
                                     @endif
                                 @elseif ($activeMode === 'real_development')
                                     A fresh private Amp thread and Orb is implementing the bound issue with normal Amp tools and your existing native repository access. Orc never provisions or copies GitHub credentials.
                                 @elseif ($activeMode === 'real_qa')
                                     A fresh private Amp thread and Orb is independently inspecting and testing the exact bound pull request. QA may not change implementation, push, merge, or grant human approval.
+                                @elseif ($activeMode === 'real_merge')
+                                    A fresh private Amp thread and Orb is rechecking the exact QA-approved pull-request head and repository policy before merging. It cannot bypass protections; a required GitHub merge queue is used automatically by normal <span class="font-mono">gh</span> behavior.
                                 @else
                                     A fresh private Amp thread and Orb is running an integration proof. It has normal Amp tools but is instructed to make no code changes; its result is not code validation or approval.
                                 @endif
@@ -133,6 +147,8 @@
                             <span class="rounded-full border border-sky-300/20 bg-sky-300/[0.08] px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-sky-200">Real Development</span>
                         @elseif ($activeMode === 'real_qa')
                             <span class="rounded-full border border-violet-300/20 bg-violet-300/[0.08] px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-violet-200">Substantive QA</span>
+                        @elseif ($activeMode === 'real_merge')
+                            <span class="rounded-full border border-amber-300/20 bg-amber-300/[0.08] px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-amber-200">Policy-bound merge</span>
                         @elseif ($activeMode)
                             <span class="rounded-full border border-amber-300/20 bg-amber-300/[0.08] px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-amber-200">Integration proof</span>
                         @endif
@@ -165,10 +181,15 @@
                                         Amp accepted this event into its queue, but the controller has not acknowledged it. HTTP 202 does not mean an Orb was launched. Check the dedicated controller lifecycle in <a class="text-sky-200 underline decoration-sky-300/30 underline-offset-2" href="{{ route('projects.settings', $run->project) }}">Project settings</a>.
                                     </div>
                                 @endif
-                                @if ($activeMode === 'real_qa' && $boundPublication?->github_pull_request_url)
+                                @if (in_array($activeMode, ['real_qa', 'real_merge'], true) && $boundPublication?->github_pull_request_url)
                                     <a class="mt-3 inline-flex items-center gap-2 rounded-xl border border-violet-300/20 bg-violet-300/[0.07] px-4 py-3 font-mono text-xs text-violet-200 transition hover:bg-violet-300/[0.12]" href="{{ $boundPublication->github_pull_request_url }}" target="_blank" rel="noopener">
                                         Inspect bound PR #{{ $boundPublication->github_pull_request_number }} <span>↗</span>
                                     </a>
+                                @endif
+                                @if ($activeMode === 'real_merge' && $latestPassingQa?->github_pull_request_head_sha)
+                                    <div class="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.05] px-4 py-3 text-xs leading-5 text-amber-100/70">
+                                        QA-approved head <span class="font-mono text-amber-200">{{ substr($latestPassingQa->github_pull_request_head_sha, 0, 12) }}</span>. Material conflict review cycle: {{ $mergeReviewCycles }}/1. Clean or mechanical resolutions may merge; the first material resolution returns to QA and Human Review.
+                                    </div>
                                 @endif
                                 @if ($activeLaunch?->delivery_status === \App\Domain\Workflow\AmpDeliveryStatus::Ambiguous || $activeLaunch?->launch_status === \App\Domain\Workflow\AmpLaunchStatus::Ambiguous)
                                     <div class="mt-5 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-xs leading-5 text-amber-100/70">
@@ -203,6 +224,10 @@
                             <div class="mb-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-xs leading-5 text-amber-100/80">
                                 <strong class="text-amber-200">Human release gate.</strong> QA was an integration proof only; no independent substantive code validation has occurred yet.
                             </div>
+                        @elseif ($run->definition->version >= 4 && $active->stage->key === 'human_review')
+                            <div class="mb-4 rounded-xl border border-violet-300/20 bg-violet-300/[0.07] px-4 py-3 text-xs leading-5 text-violet-100/80">
+                                <strong class="text-violet-200">Substantive QA passed.</strong> Approval starts a fresh policy-bound Merge agent; this click does not itself merge. Request Changes returns to fresh Development reading GitHub feedback.
+                            </div>
                         @elseif ($run->definition->version >= 3 && $active->stage->key === 'human_review')
                             <div class="mb-4 rounded-xl border border-violet-300/20 bg-violet-300/[0.07] px-4 py-3 text-xs leading-5 text-violet-100/80">
                                 <strong class="text-violet-200">Substantive QA passed.</strong> This is still a separate human release decision; Orc never approves or merges automatically.
@@ -210,6 +235,10 @@
                         @elseif ($active->stage->key === 'qa_blocked')
                             <div class="mb-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-xs leading-5 text-amber-100/80">
                                 <strong class="text-amber-200">Operator intervention required.</strong> QA could not reach a trustworthy verdict. Inspect its GitHub report before retrying in a fresh thread and Orb or cancelling the run.
+                            </div>
+                        @elseif ($active->stage->key === 'merge_blocked')
+                            <div class="mb-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-xs leading-5 text-amber-100/80">
+                                <strong class="text-amber-200">No merge was completed.</strong> The Merge agent could not verify a safe policy-compliant merge. Inspect its PR report, address the repository/access/conflict blocker, then retry in a fresh Orb. A second material-conflict review loop is intentionally not automatic.
                             </div>
                         @endif
                         @foreach ($outcomes as $transition)
@@ -225,8 +254,8 @@
                                 <form method="POST" action="{{ route('workflows.attempts.human-action', [$run, $active]) }}" class="mt-4 flex items-center justify-between gap-4 rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.05] p-5">
                                     @csrf
                                     <input type="hidden" name="outcome" value="approve">
-                                    <div><p class="text-sm font-medium text-emerald-100">Ready to ship</p><p class="mt-1 text-xs text-emerald-200/50">Approve and complete this workflow.</p></div>
-                                    <button class="button-primary bg-emerald-500 hover:bg-emerald-400" type="submit">Approve</button>
+                                    <div><p class="text-sm font-medium text-emerald-100">Ready to ship</p><p class="mt-1 text-xs text-emerald-200/50">{{ $transition->toStage->key === 'merge' ? 'Approve and start a fresh Merge agent.' : 'Approve and complete this workflow.' }}</p></div>
+                                    <button class="button-primary bg-emerald-500 hover:bg-emerald-400" type="submit">{{ $transition->toStage->key === 'merge' ? 'Approve for merge' : 'Approve' }}</button>
                                 </form>
                             @elseif ($transition->outcome === 'retry')
                                 <form method="POST" action="{{ route('workflows.attempts.human-action', [$run, $active]) }}" class="rounded-2xl border border-sky-300/15 bg-sky-300/[0.05] p-5">
@@ -245,8 +274,14 @@
     @elseif ($run->status === \App\Domain\Workflow\WorkflowStatus::Completed)
         <section class="mt-6 rounded-3xl border border-emerald-400/20 bg-emerald-400/[0.07] p-7 sm:p-9">
             <p class="font-mono text-xs uppercase tracking-[0.16em] text-emerald-400">Workflow complete</p>
-            <h2 class="mt-3 text-2xl font-semibold text-white">Approved and marked Done</h2>
+            @php
+                $verifiedMerge = $run->stageRuns->whereNotNull('github_merge_commit_sha')->sortByDesc('attempt_number')->first();
+            @endphp
+            <h2 class="mt-3 text-2xl font-semibold text-white">{{ $verifiedMerge ? 'Verified merged and marked Done' : 'Approved and marked Done' }}</h2>
             <p class="mt-2 text-sm text-zinc-500">The complete attempt history and append-only event timeline remain below.</p>
+            @if ($verifiedMerge)
+                <a class="mt-4 inline-flex items-center gap-2 font-mono text-xs text-emerald-300 hover:text-emerald-200" href="https://github.com/{{ $run->github_repository }}/commit/{{ $verifiedMerge->github_merge_commit_sha }}" target="_blank" rel="noopener">Merge commit {{ substr($verifiedMerge->github_merge_commit_sha, 0, 12) }} ↗</a>
+            @endif
         </section>
     @elseif ($run->status === \App\Domain\Workflow\WorkflowStatus::Failed)
         <section class="mt-6 rounded-3xl border border-red-400/20 bg-red-400/[0.06] p-7 sm:p-9">
@@ -294,7 +329,7 @@
                                 </option>
                             @endforeach
                         </select>
-                        <p class="mt-2 text-xs leading-5 text-zinc-400">Agent stages start a fresh thread and Orb and may spend tokens. Human Review waits for your decision. To finish, move to Human Review and use Approve.</p>
+                        <p class="mt-2 text-xs leading-5 text-zinc-400">Agent stages start a fresh thread and Orb and may spend tokens. Human Review waits for your decision. In workflow v4, approval starts Merge rather than finishing directly.</p>
                         <button class="button-primary mt-5" type="submit">
                             {{ $run->status === \App\Domain\Workflow\WorkflowStatus::Running ? 'Stop & move' : 'Resume at stage' }}
                         </button>
@@ -331,6 +366,8 @@
                                         <span class="ml-2 rounded-full border border-sky-300/20 px-2 py-0.5 font-mono text-[8px] uppercase text-sky-200">real</span>
                                     @elseif (($attempt->stage->config['agent_mode'] ?? null) === 'real_qa')
                                         <span class="ml-2 whitespace-nowrap rounded-full border border-violet-300/20 px-2 py-0.5 font-mono text-[8px] uppercase text-violet-200">substantive QA</span>
+                                    @elseif (($attempt->stage->config['agent_mode'] ?? null) === 'real_merge')
+                                        <span class="ml-2 whitespace-nowrap rounded-full border border-amber-300/20 px-2 py-0.5 font-mono text-[8px] uppercase text-amber-200">merge</span>
                                     @elseif (isset($attempt->stage->config['agent_mode']))
                                         <span class="ml-2 rounded-full border border-amber-300/20 px-2 py-0.5 font-mono text-[8px] uppercase text-amber-200">proof</span>
                                     @endif
@@ -351,6 +388,9 @@
                                     @endif
                                     @if ($attempt->github_branch)
                                         <a class="ml-3 text-zinc-500 hover:text-zinc-300" href="https://github.com/{{ $run->github_repository }}/tree/{{ rawurlencode($attempt->github_branch) }}" target="_blank" rel="noopener">Branch ↗</a>
+                                    @endif
+                                    @if ($attempt->github_merge_commit_sha)
+                                        <a class="ml-3 text-emerald-300 hover:text-emerald-200" href="https://github.com/{{ $run->github_repository }}/commit/{{ $attempt->github_merge_commit_sha }}" target="_blank" rel="noopener">Merge {{ substr($attempt->github_merge_commit_sha, 0, 10) }} ↗</a>
                                     @endif
                                 </td>
                             </tr>

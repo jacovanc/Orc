@@ -14,6 +14,7 @@ class DevelopmentWorkflowSeeder extends Seeder
         $this->seedProofWorkflow();
         $this->seedRealDevelopmentWorkflow();
         $this->seedIndependentQaWorkflow();
+        $this->seedMergeWorkflow();
     }
 
     private function seedProofWorkflow(): void
@@ -215,6 +216,108 @@ class DevelopmentWorkflowSeeder extends Seeder
             ['from_stage_id' => $qaBlocked->id, 'outcome' => 'retry', 'to_stage_id' => $qa->id],
             ['from_stage_id' => $humanReview->id, 'outcome' => 'request_changes', 'to_stage_id' => $development->id],
             ['from_stage_id' => $humanReview->id, 'outcome' => 'approve', 'to_stage_id' => $done->id],
+        ]);
+    }
+
+    private function seedMergeWorkflow(): void
+    {
+        $definition = WorkflowDefinition::query()->firstOrCreate(
+            ['key' => 'development', 'version' => 4],
+            ['name' => 'Development delivery', 'is_active' => true],
+        );
+
+        if ($definition->stages()->exists()) {
+            if ($definition->stages()->count() !== 8 || $definition->transitions()->count() !== 13) {
+                throw new RuntimeException('The immutable development workflow v4 is incomplete.');
+            }
+
+            return;
+        }
+
+        $development = $definition->stages()->create([
+            'key' => 'development',
+            'name' => 'Real Development',
+            'type' => StageType::Agent,
+            'config' => [
+                'agent_mode' => 'real_development',
+                'reuse_prior_publication' => true,
+                'role' => 'implementation',
+                'outcomes' => ['success', 'blocked'],
+            ],
+            'position' => 1,
+        ]);
+        $qa = $definition->stages()->create([
+            'key' => 'qa',
+            'name' => 'Independent QA',
+            'type' => StageType::Agent,
+            'config' => [
+                'agent_mode' => 'real_qa',
+                'role' => 'quality_assurance',
+                'outcomes' => ['pass', 'fail', 'blocked'],
+            ],
+            'position' => 2,
+        ]);
+        $developmentBlocked = $definition->stages()->create([
+            'key' => 'development_blocked',
+            'name' => 'Development Blocked Review',
+            'type' => StageType::Human,
+            'config' => ['outcomes' => ['retry']],
+            'position' => 3,
+        ]);
+        $qaBlocked = $definition->stages()->create([
+            'key' => 'qa_blocked',
+            'name' => 'QA Blocked Review',
+            'type' => StageType::Human,
+            'config' => ['outcomes' => ['retry']],
+            'position' => 4,
+        ]);
+        $humanReview = $definition->stages()->create([
+            'key' => 'human_review',
+            'name' => 'Human Review',
+            'type' => StageType::Human,
+            'config' => ['outcomes' => ['request_changes', 'approve']],
+            'position' => 5,
+        ]);
+        $merge = $definition->stages()->create([
+            'key' => 'merge',
+            'name' => 'Merge',
+            'type' => StageType::Agent,
+            'config' => [
+                'agent_mode' => 'real_merge',
+                'role' => 'merge',
+                'outcomes' => ['merged', 'requires_review', 'blocked'],
+            ],
+            'position' => 6,
+        ]);
+        $mergeBlocked = $definition->stages()->create([
+            'key' => 'merge_blocked',
+            'name' => 'Merge Blocked Review',
+            'type' => StageType::Human,
+            'config' => ['outcomes' => ['retry']],
+            'position' => 7,
+        ]);
+        $done = $definition->stages()->create([
+            'key' => 'done',
+            'name' => 'Done',
+            'type' => StageType::Terminal,
+            'config' => ['outcomes' => []],
+            'position' => 8,
+        ]);
+
+        $definition->transitions()->createMany([
+            ['from_stage_id' => $development->id, 'outcome' => 'success', 'to_stage_id' => $qa->id],
+            ['from_stage_id' => $development->id, 'outcome' => 'blocked', 'to_stage_id' => $developmentBlocked->id],
+            ['from_stage_id' => $qa->id, 'outcome' => 'pass', 'to_stage_id' => $humanReview->id],
+            ['from_stage_id' => $qa->id, 'outcome' => 'fail', 'to_stage_id' => $development->id],
+            ['from_stage_id' => $qa->id, 'outcome' => 'blocked', 'to_stage_id' => $qaBlocked->id],
+            ['from_stage_id' => $developmentBlocked->id, 'outcome' => 'retry', 'to_stage_id' => $development->id],
+            ['from_stage_id' => $qaBlocked->id, 'outcome' => 'retry', 'to_stage_id' => $qa->id],
+            ['from_stage_id' => $humanReview->id, 'outcome' => 'request_changes', 'to_stage_id' => $development->id],
+            ['from_stage_id' => $humanReview->id, 'outcome' => 'approve', 'to_stage_id' => $merge->id],
+            ['from_stage_id' => $merge->id, 'outcome' => 'merged', 'to_stage_id' => $done->id],
+            ['from_stage_id' => $merge->id, 'outcome' => 'requires_review', 'to_stage_id' => $qa->id],
+            ['from_stage_id' => $merge->id, 'outcome' => 'blocked', 'to_stage_id' => $mergeBlocked->id],
+            ['from_stage_id' => $mergeBlocked->id, 'outcome' => 'retry', 'to_stage_id' => $merge->id],
         ]);
     }
 }

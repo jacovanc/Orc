@@ -57,6 +57,13 @@ class WorkflowEngine
             if (! $lockedDefinition->is_active) {
                 throw new WorkflowConflict('This workflow definition is not available for new runs.');
             }
+            if (
+                config('services.amp.enabled')
+                && $lockedDefinition->version >= 4
+                && (! $connection || $connection->controller_protocol_version < 2)
+            ) {
+                throw new WorkflowConflict('This workflow requires an Amp controller with Merge support. Pair an updated project connection first.');
+            }
 
             $firstStage = $lockedDefinition->stages()->orderBy('position')->first();
             if (! $firstStage) {
@@ -224,7 +231,7 @@ class WorkflowEngine
             }
             if ($destination->type === StageType::Agent) {
                 $this->assertRunAmpAuthorized($lockedRun, $actor);
-                $this->assertManualAgentDestinationReady($lockedRun, $destination);
+                $this->assertAgentDestinationReady($lockedRun, $destination);
             }
 
             if ($lockedRun->status === WorkflowStatus::Running) {
@@ -361,6 +368,9 @@ class WorkflowEngine
             }
             if ($source === CompletionSource::HumanAction && $destination->type === StageType::Agent) {
                 $this->assertRunAmpAuthorized($lockedRun, $actor);
+            }
+            if ($destination->type === StageType::Agent) {
+                $this->assertAgentDestinationReady($lockedRun, $destination);
             }
 
             $now = now();
@@ -505,6 +515,7 @@ class WorkflowEngine
                         'stage.report_claimed' => $this->claimAmpReportPublication($payload),
                         'stage.reported' => $this->recordAmpReport($payload),
                         'stage.published' => $this->recordAmpPublication($payload),
+                        'stage.merge_verified' => $this->recordAmpMerge($payload),
                         'stage.completed' => $this->completeAmpStage($payload),
                         'stage.failed' => $this->failAmpStage($payload),
                     };
@@ -561,6 +572,8 @@ class WorkflowEngine
             $this->assertLaunchConnection($attempt->ampLaunch, $connection, $ampProjectId, $connectionId);
         }
         $priorPublication = $this->priorPublication($attempt);
+        $approvedQa = $this->latestApprovedQa($attempt);
+        $mergeReviewCycles = $this->mergeReviewCycles($attempt);
 
         return [
             'schema_version' => 1,
@@ -589,7 +602,11 @@ class WorkflowEngine
             'github_branch' => $attempt->github_branch,
             'github_pull_request_number' => $attempt->github_pull_request_number,
             'github_pull_request_url' => $attempt->github_pull_request_url,
-            'allowed_outcomes' => $attempt->stage->outgoingTransitions->pluck('outcome')->values()->all(),
+            'github_pull_request_head_sha' => $attempt->github_pull_request_head_sha,
+            'github_merge_commit_sha' => $attempt->github_merge_commit_sha,
+            'approved_pull_request_head_sha' => $approvedQa?->github_pull_request_head_sha,
+            'merge_review_cycles' => $mergeReviewCycles,
+            'allowed_outcomes' => $this->allowedOutcomes($attempt, $mergeReviewCycles),
             'completed' => $attempt->status === StageRunStatus::Completed,
             'outcome' => $attempt->outcome,
             'is_active' => $attempt->active_slot === 1
@@ -614,6 +631,7 @@ class WorkflowEngine
             'report' => 'stage.reported',
             'report_claim' => 'stage.report_claimed',
             'publication' => 'stage.published',
+            'merge' => 'stage.merge_verified',
             'complete' => 'stage.completed',
             'fail' => 'stage.failed',
         };
@@ -853,6 +871,9 @@ class WorkflowEngine
         }
 
         $mode = $this->agentMode($launch->stageRun->stage);
+        if (! in_array($outcome, $this->allowedOutcomes($launch->stageRun), true)) {
+            throw new WorkflowConflict("Outcome '{$outcome}' is not permitted for this stage attempt.");
+        }
         if ($mode === 'real_development' && $outcome === 'success') {
             if (
                 $launch->stageRun->github_branch !== $this->expectedBranch($launch->stageRun)
@@ -867,6 +888,28 @@ class WorkflowEngine
         }
         if (! empty($payload['capability_authenticated']) && $mode === 'real_qa' && $launch->stageRun->github_report_kind !== $outcome) {
             throw new WorkflowConflict('The QA report kind must match its completion outcome.');
+        }
+        if (! empty($payload['capability_authenticated']) && $mode === 'real_merge') {
+            if ($launch->stageRun->github_report_kind !== $outcome) {
+                throw new WorkflowConflict('The Merge report kind must match its completion outcome.');
+            }
+            if ($outcome === 'merged' && (
+                ! $launch->stageRun->github_pull_request_head_sha
+                || ! $launch->stageRun->github_merge_commit_sha
+            )) {
+                throw new WorkflowConflict('Merge completion requires verified pull-request head and merge commit evidence.');
+            }
+            if ($outcome === 'requires_review') {
+                $approvedQa = $this->latestApprovedQa($launch->stageRun);
+                if (
+                    $this->mergeReviewCycles($launch->stageRun) >= 1
+                    || ! $approvedQa?->github_pull_request_head_sha
+                    || ! $launch->stageRun->github_pull_request_head_sha
+                    || hash_equals($approvedQa->github_pull_request_head_sha, $launch->stageRun->github_pull_request_head_sha)
+                ) {
+                    throw new WorkflowConflict('Only the first material conflict resolved onto a new pull-request head may request another review cycle.');
+                }
+            }
         }
         if (! empty($payload['capability_authenticated']) && $mode === 'proof_qa' && $launch->stageRun->github_report_kind !== 'proof') {
             throw new WorkflowConflict('QA integration proof requires a proof-only report.');
@@ -917,11 +960,26 @@ class WorkflowEngine
             $allowedKinds = match ($this->agentMode($launch->stageRun->stage)) {
                 'real_development' => ['success', 'blocked'],
                 'real_qa' => ['pass', 'fail', 'blocked'],
+                'real_merge' => ['merged', 'requires_review', 'blocked'],
                 default => ['proof'],
             };
             if (! is_string($reportKind) || ! in_array($reportKind, $allowedKinds, true)) {
                 throw new WorkflowConflict('The stage report kind is invalid for this agent mode.');
             }
+            if (
+                $this->agentMode($launch->stageRun->stage) === 'real_merge'
+                && ! in_array($reportKind, $this->allowedOutcomes($launch->stageRun), true)
+            ) {
+                throw new WorkflowConflict('This Merge outcome is no longer permitted for the run.');
+            }
+        }
+
+        $headSha = $payload['github_pull_request_head_sha'] ?? null;
+        if (
+            $this->agentMode($launch->stageRun->stage) === 'real_merge'
+            || ($this->agentMode($launch->stageRun->stage) === 'real_qa' && $this->requiresMergeEvidence($launch->stageRun))
+        ) {
+            $this->assertGitCommitSha($headSha, 'The stage report requires the exact pull-request head SHA.');
         }
 
         if ($launch->stageRun->github_report_url || $launch->stageRun->github_report_comment_id) {
@@ -929,6 +987,7 @@ class WorkflowEngine
                 $launch->stageRun->github_report_url !== $reportUrl
                 || $launch->stageRun->github_report_comment_id !== $commentId
                 || $launch->stageRun->github_report_kind !== $reportKind
+                || $launch->stageRun->github_pull_request_head_sha !== $headSha
             ) {
                 throw new WorkflowConflict('A different GitHub report is already attested for this attempt.');
             }
@@ -940,6 +999,7 @@ class WorkflowEngine
             'github_report_url' => $reportUrl,
             'github_report_comment_id' => $commentId,
             'github_report_kind' => $reportKind,
+            'github_pull_request_head_sha' => $headSha,
         ])->save();
         $this->recordEvent($launch->stageRun->workflowRun, $launch->stageRun, 'stage.reported', null, [
             'stage_key' => $launch->stageRun->stage->key,
@@ -947,6 +1007,7 @@ class WorkflowEngine
             'github_report_url' => $reportUrl,
             'github_report_comment_id' => $commentId,
             'github_report_kind' => $reportKind,
+            'github_pull_request_head_sha' => $headSha,
             'amp_thread_id' => $threadId,
         ]);
 
@@ -988,6 +1049,7 @@ class WorkflowEngine
         $branch = $payload['github_branch'] ?? null;
         $pullRequestNumber = $payload['github_pull_request_number'] ?? null;
         $pullRequestUrl = $payload['github_pull_request_url'] ?? null;
+        $pullRequestHeadSha = $payload['github_pull_request_head_sha'] ?? null;
         $launch = $this->lockedAmpLaunch($payload);
 
         $this->assertCurrentAmpAttempt($launch->stageRun);
@@ -1003,12 +1065,16 @@ class WorkflowEngine
             $pullRequestNumber,
             $pullRequestUrl,
         );
+        if ($this->requiresMergeEvidence($launch->stageRun)) {
+            $this->assertGitCommitSha($pullRequestHeadSha, 'Code publication requires the exact pull-request head SHA.');
+        }
 
         if ($launch->stageRun->github_pull_request_number) {
             if (
                 $launch->stageRun->github_branch !== $branch
                 || $launch->stageRun->github_pull_request_number !== $pullRequestNumber
                 || $launch->stageRun->github_pull_request_url !== $pullRequestUrl
+                || $launch->stageRun->github_pull_request_head_sha !== $pullRequestHeadSha
             ) {
                 throw new WorkflowConflict('A different code publication is already bound to this attempt.');
             }
@@ -1020,6 +1086,7 @@ class WorkflowEngine
             'github_branch' => $branch,
             'github_pull_request_number' => $pullRequestNumber,
             'github_pull_request_url' => $pullRequestUrl,
+            'github_pull_request_head_sha' => $pullRequestHeadSha,
         ])->save();
         $this->recordEvent($launch->stageRun->workflowRun, $launch->stageRun, 'stage.published', null, [
             'stage_key' => $launch->stageRun->stage->key,
@@ -1027,10 +1094,69 @@ class WorkflowEngine
             'github_branch' => $branch,
             'github_pull_request_number' => $pullRequestNumber,
             'github_pull_request_url' => $pullRequestUrl,
+            'github_pull_request_head_sha' => $pullRequestHeadSha,
             'amp_thread_id' => $threadId,
         ]);
 
         return ['accepted' => true, 'disposition' => 'published'];
+    }
+
+    private function recordAmpMerge(array $payload): array
+    {
+        $threadId = $this->requiredThreadId($payload);
+        $pullRequestNumber = $payload['github_pull_request_number'] ?? null;
+        $pullRequestUrl = $payload['github_pull_request_url'] ?? null;
+        $pullRequestHeadSha = $payload['github_pull_request_head_sha'] ?? null;
+        $mergeCommitSha = $payload['github_merge_commit_sha'] ?? null;
+        $launch = $this->lockedAmpLaunch($payload);
+
+        $this->assertCurrentAmpAttempt($launch->stageRun);
+        $this->bindAmpThread($launch->stageRun, $threadId);
+        if ($this->agentMode($launch->stageRun->stage) !== 'real_merge') {
+            throw new WorkflowConflict('Only a Merge attempt can attest a completed merge.');
+        }
+        $this->assertGitHubPullRequest($launch->stageRun->workflowRun, $pullRequestNumber, $pullRequestUrl);
+        $this->assertGitCommitSha($pullRequestHeadSha, 'Merge evidence requires the exact pull-request head SHA.');
+        $this->assertGitCommitSha($mergeCommitSha, 'Merge evidence requires the exact GitHub merge commit SHA.');
+        $prior = $this->priorPublication($launch->stageRun);
+        if (
+            ! $prior
+            || $prior->github_pull_request_number !== $pullRequestNumber
+            || $prior->github_pull_request_url !== $pullRequestUrl
+        ) {
+            throw new WorkflowConflict('The merge evidence does not match the pull request bound to this workflow.');
+        }
+
+        if ($launch->stageRun->github_merge_commit_sha) {
+            if (
+                $launch->stageRun->github_pull_request_number !== $pullRequestNumber
+                || $launch->stageRun->github_pull_request_url !== $pullRequestUrl
+                || $launch->stageRun->github_pull_request_head_sha !== $pullRequestHeadSha
+                || $launch->stageRun->github_merge_commit_sha !== $mergeCommitSha
+            ) {
+                throw new WorkflowConflict('Different merge evidence is already bound to this attempt.');
+            }
+
+            return ['accepted' => true, 'disposition' => 'already_verified'];
+        }
+
+        $launch->stageRun->forceFill([
+            'github_branch' => $prior->github_branch,
+            'github_pull_request_number' => $pullRequestNumber,
+            'github_pull_request_url' => $pullRequestUrl,
+            'github_pull_request_head_sha' => $pullRequestHeadSha,
+            'github_merge_commit_sha' => $mergeCommitSha,
+        ])->save();
+        $this->recordEvent($launch->stageRun->workflowRun, $launch->stageRun, 'stage.merge_verified', null, [
+            'stage_key' => $launch->stageRun->stage->key,
+            'attempt_number' => $launch->stageRun->attempt_number,
+            'github_pull_request_url' => $pullRequestUrl,
+            'github_pull_request_head_sha' => $pullRequestHeadSha,
+            'github_merge_commit_sha' => $mergeCommitSha,
+            'amp_thread_id' => $threadId,
+        ]);
+
+        return ['accepted' => true, 'disposition' => 'verified'];
     }
 
     private function failAmpStage(array $payload): array
@@ -1165,14 +1291,14 @@ class WorkflowEngine
 
         $run = $attempt->workflowRun;
         $path = strtolower(rtrim((string) parse_url($reportUrl, PHP_URL_PATH), '/'));
-        if ($this->agentMode($attempt->stage) === 'real_qa') {
+        if (in_array($this->agentMode($attempt->stage), ['real_qa', 'real_merge'], true)) {
             $publication = $this->priorPublication($attempt);
             if (! $publication?->github_pull_request_number) {
-                throw new WorkflowConflict('Independent QA requires a verified Development pull request.');
+                throw new WorkflowConflict('This stage requires a verified Development pull request.');
             }
             $expectedPath = strtolower('/'.$run->github_repository.'/pull/'.$publication->github_pull_request_number);
             if ($path !== $expectedPath) {
-                throw new WorkflowConflict('The QA report URL must belong to the pull request bound to this attempt.');
+                throw new WorkflowConflict('The stage report URL must belong to the pull request bound to this attempt.');
             }
         } else {
             $expectedPath = strtolower('/'.$run->github_repository.'/issues/'.$run->github_issue_number);
@@ -1317,19 +1443,32 @@ class WorkflowEngine
         }
     }
 
-    private function assertManualAgentDestinationReady(WorkflowRun $run, WorkflowStage $destination): void
+    private function assertAgentDestinationReady(WorkflowRun $run, WorkflowStage $destination): void
     {
-        if ($this->agentMode($destination) !== 'real_qa') {
-            return;
-        }
-
-        $hasPullRequest = StageRun::query()
+        $mode = $this->agentMode($destination);
+        $publication = StageRun::query()
             ->where('workflow_run_id', $run->getKey())
             ->whereNotNull('github_pull_request_number')
             ->whereNotNull('github_pull_request_url')
-            ->exists();
-        if (! $hasPullRequest) {
+            ->latest('attempt_number')
+            ->first();
+        if ($mode === 'real_qa' && ! $publication) {
             throw new WorkflowConflict('Independent QA requires an existing Development pull request.');
+        }
+        if ($mode === 'real_merge') {
+            if (! config('services.amp.enabled')) {
+                return;
+            }
+            $latestAttemptNumber = ((int) StageRun::query()
+                ->where('workflow_run_id', $run->getKey())
+                ->max('attempt_number')) + 1;
+            $prospective = new StageRun([
+                'workflow_run_id' => $run->getKey(),
+                'attempt_number' => $latestAttemptNumber,
+            ]);
+            if (! $publication || ! $this->latestApprovedQa($prospective)?->github_pull_request_head_sha) {
+                throw new WorkflowConflict('Merge requires an exact pull request head from the latest passing independent QA attempt.');
+            }
         }
     }
 
@@ -1533,5 +1672,52 @@ class WorkflowEngine
             ->whereNotNull('github_pull_request_number')
             ->latest('attempt_number')
             ->first();
+    }
+
+    private function latestApprovedQa(StageRun $attempt): ?StageRun
+    {
+        return StageRun::query()
+            ->with('stage')
+            ->where('workflow_run_id', $attempt->workflow_run_id)
+            ->where('attempt_number', '<', $attempt->attempt_number)
+            ->where('outcome', 'pass')
+            ->whereNotNull('github_pull_request_head_sha')
+            ->latest('attempt_number')
+            ->get()
+            ->first(fn (StageRun $candidate) => $this->agentMode($candidate->stage) === 'real_qa');
+    }
+
+    private function mergeReviewCycles(StageRun $attempt): int
+    {
+        return StageRun::query()
+            ->with('stage')
+            ->where('workflow_run_id', $attempt->workflow_run_id)
+            ->where('attempt_number', '<', $attempt->attempt_number)
+            ->where('outcome', 'requires_review')
+            ->get()
+            ->filter(fn (StageRun $candidate) => $this->agentMode($candidate->stage) === 'real_merge')
+            ->count();
+    }
+
+    private function allowedOutcomes(StageRun $attempt, ?int $mergeReviewCycles = null): array
+    {
+        $outcomes = $attempt->stage->outgoingTransitions->pluck('outcome');
+        if ($this->agentMode($attempt->stage) === 'real_merge' && ($mergeReviewCycles ?? $this->mergeReviewCycles($attempt)) >= 1) {
+            $outcomes = $outcomes->reject(fn (string $outcome) => $outcome === 'requires_review');
+        }
+
+        return $outcomes->values()->all();
+    }
+
+    private function requiresMergeEvidence(StageRun $attempt): bool
+    {
+        return (int) $attempt->workflowRun->definition()->value('version') >= 4;
+    }
+
+    private function assertGitCommitSha(mixed $sha, string $message): void
+    {
+        if (! is_string($sha) || ! preg_match('/^[a-f0-9]{40}$/i', $sha)) {
+            throw new WorkflowConflict($message);
+        }
     }
 }

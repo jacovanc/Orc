@@ -9,6 +9,13 @@
             <p class="mt-3 text-zinc-500">Start from an issue in <span class="font-mono text-zinc-300">{{ $project->github_repository }}</span>. Only identifiers and orchestration state are stored here.</p>
         </div>
 
+        @if (! $supportsMerge)
+            <div class="mt-6 rounded-2xl border border-amber-300/20 bg-amber-300/[0.07] px-5 py-4 text-sm leading-6 text-amber-100/80">
+                <strong class="text-amber-200">Merge workflow unavailable on this connection.</strong>
+                Pair an updated controller from <a class="underline decoration-amber-300/30 underline-offset-2" href="{{ route('projects.settings', $project) }}">Project settings</a> to start workflow v4. Existing definitions remain available and existing runs are unchanged.
+            </div>
+        @endif
+
         <form method="POST" action="{{ route('projects.workflows.store', $project) }}" class="panel mt-10 overflow-hidden">
             @csrf
             <div class="border-b border-white/[0.07] p-6 sm:p-8">

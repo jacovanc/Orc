@@ -24,6 +24,8 @@ class StageRun extends Model
         'github_branch',
         'github_pull_request_number',
         'github_pull_request_url',
+        'github_pull_request_head_sha',
+        'github_merge_commit_sha',
         'active_slot',
         'started_at',
         'completed_at',
