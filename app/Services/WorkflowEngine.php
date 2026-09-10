@@ -30,7 +30,10 @@ use Illuminate\Support\Str;
 
 class WorkflowEngine
 {
-    public function __construct(private readonly WorkflowAttentionNotifier $attentionNotifier) {}
+    public function __construct(
+        private readonly WorkflowAttentionNotifier $attentionNotifier,
+        private readonly StageTaskInstructionService $taskInstructions,
+    ) {}
 
     public function start(
         User $actor,
@@ -62,9 +65,11 @@ class WorkflowEngine
             if (
                 config('services.amp.enabled')
                 && $lockedDefinition->version >= 4
-                && (! $connection || $connection->controller_protocol_version < 2)
+                && (! $connection || $connection->controller_protocol_version < ($lockedDefinition->version >= 5 ? 3 : 2))
             ) {
-                throw new WorkflowConflict('This workflow requires an Amp controller with Merge support. Pair an updated project connection first.');
+                throw new WorkflowConflict($lockedDefinition->version >= 5
+                    ? 'This workflow requires an Amp controller with Explanation and task-instruction support. Pair an updated project connection first.'
+                    : 'This workflow requires an Amp controller with Merge support. Pair an updated project connection first.');
             }
 
             $firstStage = $lockedDefinition->stages()->orderBy('position')->first();
@@ -88,6 +93,7 @@ class WorkflowEngine
                 'started_at' => $now,
                 'completed_at' => $firstStage->type === StageType::Terminal ? $now : null,
             ]);
+            $this->taskInstructions->snapshotForRun($run, $lockedDefinition);
 
             $attempt = $this->createStageAttempt($run, $firstStage, 1, $now);
             $this->recordEvent($run, null, 'workflow.started', $actor, [
@@ -891,6 +897,9 @@ class WorkflowEngine
         if (! empty($payload['capability_authenticated']) && $mode === 'real_qa' && $launch->stageRun->github_report_kind !== $outcome) {
             throw new WorkflowConflict('The QA report kind must match its completion outcome.');
         }
+        if (! empty($payload['capability_authenticated']) && $mode === 'real_explanation' && $launch->stageRun->github_report_kind !== $outcome) {
+            throw new WorkflowConflict('The Explanation report kind must match its completion outcome.');
+        }
         if (! empty($payload['capability_authenticated']) && $mode === 'real_merge') {
             if ($launch->stageRun->github_report_kind !== $outcome) {
                 throw new WorkflowConflict('The Merge report kind must match its completion outcome.');
@@ -962,6 +971,7 @@ class WorkflowEngine
             $allowedKinds = match ($this->agentMode($launch->stageRun->stage)) {
                 'real_development' => ['success', 'blocked'],
                 'real_qa' => ['pass', 'fail', 'blocked'],
+                'real_explanation' => ['completed', 'blocked'],
                 'real_merge' => ['merged', 'requires_review', 'blocked'],
                 default => ['proof'],
             };
@@ -1293,7 +1303,7 @@ class WorkflowEngine
 
         $run = $attempt->workflowRun;
         $path = strtolower(rtrim((string) parse_url($reportUrl, PHP_URL_PATH), '/'));
-        if (in_array($this->agentMode($attempt->stage), ['real_qa', 'real_merge'], true)) {
+        if (in_array($this->agentMode($attempt->stage), ['real_qa', 'real_explanation', 'real_merge'], true)) {
             $publication = $this->priorPublication($attempt);
             if (! $publication?->github_pull_request_number) {
                 throw new WorkflowConflict('This stage requires a verified Development pull request.');
@@ -1454,8 +1464,10 @@ class WorkflowEngine
             ->whereNotNull('github_pull_request_url')
             ->latest('attempt_number')
             ->first();
-        if ($mode === 'real_qa' && ! $publication) {
-            throw new WorkflowConflict('Independent QA requires an existing Development pull request.');
+        if (in_array($mode, ['real_qa', 'real_explanation'], true) && ! $publication) {
+            throw new WorkflowConflict($mode === 'real_explanation'
+                ? 'Explanation requires an existing Development pull request.'
+                : 'Independent QA requires an existing Development pull request.');
         }
         if ($mode === 'real_merge') {
             if (! config('services.amp.enabled')) {

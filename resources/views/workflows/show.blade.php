@@ -135,6 +135,7 @@
                             @elseif ($awaitingController) Waiting for the project controller to acknowledge this launch. No agent is running yet.
                             @elseif ($activeMode === 'real_development') A fresh Amp agent is implementing the GitHub issue.
                             @elseif ($activeMode === 'real_qa') A fresh independent agent is inspecting and testing the bound pull request.
+                            @elseif ($activeMode === 'real_explanation') A fresh read-only agent is answering Human Review questions on the bound pull request.
                             @elseif ($activeMode === 'real_merge') A fresh agent is verifying and merging the QA-approved pull request under repository policy.
                             @else A fresh agent is running a harmless integration proof; this is not code validation or approval.
                             @endif
@@ -148,6 +149,8 @@
                             <span class="font-mono text-[10px] uppercase tracking-wider text-sky-200">Development agent</span>
                         @elseif ($activeMode === 'real_qa')
                             <span class="font-mono text-[10px] uppercase tracking-wider text-violet-200">Substantive QA</span>
+                        @elseif ($activeMode === 'real_explanation')
+                            <span class="font-mono text-[10px] uppercase tracking-wider text-teal-200">Read-only explanation</span>
                         @elseif ($activeMode === 'real_merge')
                             <span class="font-mono text-[10px] uppercase tracking-wider text-amber-200">Policy-bound merge</span>
                         @elseif ($activeMode)
@@ -238,6 +241,10 @@
                             <div class="mb-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-xs leading-5 text-amber-100/80">
                                 <strong class="text-amber-200">Human release gate.</strong> QA was an integration proof only; no independent substantive code validation has occurred yet.
                             </div>
+                        @elseif ($run->definition->version >= 5 && $active->stage->key === 'human_review')
+                            <div class="mb-4 rounded-xl border border-violet-300/20 bg-violet-300/[0.07] px-4 py-3 text-xs leading-5 text-violet-100/80">
+                                <strong class="text-violet-200">Human release gate.</strong> Ask questions starts a fresh read-only Explanation agent after you post questions on the PR. Request Changes starts fresh Development. Approval starts Merge; none of these actions is automatic approval.
+                            </div>
                         @elseif ($run->definition->version >= 4 && $active->stage->key === 'human_review')
                             <div class="mb-4 rounded-xl border border-violet-300/20 bg-violet-300/[0.07] px-4 py-3 text-xs leading-5 text-violet-100/80">
                                 <strong class="text-violet-200">Substantive QA passed.</strong> Approval starts a fresh policy-bound Merge agent; this click does not itself merge. Request Changes returns to fresh Development reading GitHub feedback.
@@ -263,6 +270,15 @@
                                     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
                                         <div><p class="text-sm font-medium text-orange-100">Send back to Development</p><p class="mt-1 text-xs leading-5 text-zinc-400">Comment on GitHub first. The fresh Development agent will reread the bound pull request.</p></div>
                                         <button class="button-quiet shrink-0 border border-white/15 bg-white/[0.05] text-zinc-200 hover:bg-white/[0.09]" type="submit">Request changes <span class="text-zinc-500">→</span></button>
+                                    </div>
+                                </form>
+                            @elseif ($transition->outcome === 'ask_questions')
+                                <form method="POST" action="{{ route('workflows.attempts.human-action', [$run, $active]) }}" class="mt-4 rounded-2xl border border-teal-300/15 bg-teal-300/[0.05] p-5">
+                                    @csrf
+                                    <input type="hidden" name="outcome" value="ask_questions">
+                                    <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                                        <div><p class="text-sm font-medium text-teal-100">Ask about the implementation</p><p class="mt-1 text-xs leading-5 text-teal-200/60">Post your questions on the PR first. A fresh read-only agent answers there, then returns here without changing code or approval state.</p></div>
+                                        <button class="button-quiet shrink-0 border border-teal-200/15 bg-teal-300/[0.06] text-teal-100 hover:bg-teal-300/[0.1]" type="submit">Ask questions <span class="text-teal-300/50">→</span></button>
                                     </div>
                                 </form>
                             @elseif ($transition->outcome === 'approve')
@@ -356,7 +372,7 @@
                                 </option>
                             @endforeach
                         </select>
-                        <p class="mt-2 text-xs leading-5 text-zinc-400">Agent stages start a fresh thread and Orb and may spend tokens. Human Review waits for your decision. In workflow v4, approval starts Merge rather than finishing directly.</p>
+                        <p class="mt-2 text-xs leading-5 text-zinc-400">Agent stages start a fresh thread and Orb and may spend tokens. Human Review waits for your decision. In workflows v4+, approval starts Merge rather than finishing directly.</p>
                         <button class="button-primary mt-5" type="submit">
                             {{ $run->status === \App\Domain\Workflow\WorkflowStatus::Running ? 'Stop & move' : 'Resume at stage' }}
                         </button>
@@ -378,6 +394,8 @@
                     @foreach ($run->stageRuns as $attempt)
                         @php
                             $reportEvent = $run->events->first(fn ($event) => $event->stage_run_id === $attempt->id && isset($event->metadata['github_report_url']));
+                            $attemptMode = $attempt->stage->config['agent_mode'] ?? null;
+                            $executedInstruction = $attemptMode ? $run->stageInstructions->firstWhere('agent_mode', $attemptMode) : null;
                             $attemptAwaitingController = $ampEnabled
                                 && $attempt->id === $active?->id
                                 && $attempt->stage->type === \App\Domain\Workflow\StageType::Agent
@@ -415,6 +433,12 @@
                                     <span class="font-mono text-[10px] text-zinc-700">{{ $ampEnabled ? ($attempt->ampLaunch?->launch_status?->value ?? 'No external reference') : 'Not connected' }}</span>
                                 @endunless
                             </div>
+                            @if ($executedInstruction)
+                                <details class="mt-3 rounded-xl border border-white/[0.06] bg-black/10 px-3 py-2 text-xs text-zinc-500">
+                                    <summary class="cursor-pointer select-none hover:text-zinc-300">Run task body snapshot v{{ $executedInstruction->source_version }}</summary>
+                                    <pre class="mt-3 whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-zinc-400">{{ $executedInstruction->body }}</pre>
+                                </details>
+                            @endif
                         </article>
                     @endforeach
                 </div>

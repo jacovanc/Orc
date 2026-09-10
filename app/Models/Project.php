@@ -40,4 +40,9 @@ class Project extends Model
     {
         return $this->hasMany(WorkflowRun::class);
     }
+
+    public function stageInstructionVersions(): HasMany
+    {
+        return $this->hasMany(ProjectStageInstructionVersion::class);
+    }
 }

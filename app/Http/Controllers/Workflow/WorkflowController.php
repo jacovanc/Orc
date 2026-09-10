@@ -54,17 +54,20 @@ class WorkflowController extends Controller
 
             return view('workflows.choose-project', compact('projects'));
         }
+        $controllerProtocol = $project->currentConnection?->controller_protocol_version ?? 1;
         $supportsMerge = ! config('services.amp.enabled')
-            || ($project->currentConnection?->controller_protocol_version ?? 1) >= 2;
+            || $controllerProtocol >= 2;
+        $supportsExplanation = ! config('services.amp.enabled') || $controllerProtocol >= 3;
         $definitions = WorkflowDefinition::query()
             ->where('is_active', true)
             ->when(! $supportsMerge, fn ($query) => $query->where('version', '<', 4))
+            ->when($supportsMerge && ! $supportsExplanation, fn ($query) => $query->where('version', '<', 5))
             ->with('stages')
             ->orderBy('name')
             ->orderByDesc('version')
             ->get();
 
-        return view('workflows.create', compact('definitions', 'project', 'supportsMerge'));
+        return view('workflows.create', compact('definitions', 'project', 'supportsMerge', 'supportsExplanation'));
     }
 
     public function store(StartWorkflowRequest $request, Project $project): RedirectResponse
@@ -104,6 +107,7 @@ class WorkflowController extends Controller
             'project',
             'stageRuns.stage',
             'stageRuns.ampLaunch',
+            'stageInstructions',
             'events.stageRun.stage',
         ]);
 

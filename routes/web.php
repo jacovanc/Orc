@@ -41,6 +41,18 @@ Route::get('/integrations/amp/plugins/orc-worker-v2.ts', function () {
     ]);
 })->name('integrations.amp.worker-plugin-v2');
 
+Route::get('/integrations/amp/plugins/orc-worker-v3.ts', function () {
+    $source = (string) file_get_contents(resource_path('amp/orc-worker-v3.ts'));
+
+    return response($source, 200, [
+        'Cache-Control' => 'public, max-age=31536000, immutable',
+        'Content-Type' => 'text/plain; charset=UTF-8',
+        'Content-Disposition' => 'inline; filename="orc-worker-v3.ts"',
+        'ETag' => '"'.hash('sha256', $source).'"',
+        'X-Content-Type-Options' => 'nosniff',
+    ]);
+})->name('integrations.amp.worker-plugin-v3');
+
 Route::get('/dashboard', function () {
     return to_route('workflows.index');
 })->middleware('auth')->name('dashboard');
@@ -53,6 +65,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/projects/{project}/connections/setup', [ProjectController::class, 'issueSetup'])->name('projects.connections.setup');
     Route::post('/projects/{project}/connections', [ProjectController::class, 'configure'])->name('projects.connections.store');
     Route::post('/projects/{project}/connections/verify', [ProjectController::class, 'verify'])->name('projects.connections.verify');
+    Route::put('/projects/{project}/stage-instructions', [ProjectController::class, 'updateStageInstruction'])->name('projects.stage-instructions.update');
     Route::get('/projects/{project}/workflows/start', [WorkflowController::class, 'create'])->name('projects.workflows.create');
     Route::post('/projects/{project}/workflows', [WorkflowController::class, 'store'])->name('projects.workflows.store');
     Route::get('/workflows', [WorkflowController::class, 'index'])->name('workflows.index');

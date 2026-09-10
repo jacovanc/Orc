@@ -16,9 +16,9 @@ use Illuminate\Support\Str;
 
 class AmpProjectConnectionService
 {
-    private const CONTROLLER_KEY_PREFIX = 'orc-stage-launch-v12';
+    private const CONTROLLER_KEY_PREFIX = 'orc-stage-launch-v13';
 
-    private const CONTROLLER_PROTOCOL_VERSION = 2;
+    private const CONTROLLER_PROTOCOL_VERSION = 3;
 
     private const SETUP_TTL_MINUTES = 20;
 
@@ -77,7 +77,7 @@ class AmpProjectConnectionService
 
     public function setupPrompt(AmpConnectionSetup $setup): string
     {
-        $workerSource = (string) file_get_contents(resource_path('amp/orc-worker-v2.ts'));
+        $workerSource = (string) file_get_contents(resource_path('amp/orc-worker-v3.ts'));
 
         return implode("\n", [
             'Set up this existing Orc Project from this exact Amp project.',
@@ -88,7 +88,7 @@ class AmpProjectConnectionService
             '',
             '1. Load the `building-plugins` skill before inspecting or changing plugins.',
             '2. Ensure the exact worker below is published as `orc-worker.ts` in my writable Personal User Plugins repository (not a project, workspace, or machine-only plugin). Preserve every unrelated plugin. Fetch it only over HTTPS, verify its SHA-256 before installing it, inspect the source, and use Amp’s supported global User Plugins repository workflow to commit and push only this worker. The consent above authorizes that personal-plugin publication. If the repository already contains this exact digest, do not create another commit.',
-            '   worker_url: '.route('integrations.amp.worker-plugin-v2'),
+            '   worker_url: '.route('integrations.amp.worker-plugin-v3'),
             '   worker_sha256: '.hash('sha256', $workerSource),
             '3. Never put the setup capability below in a shell command, file, Git commit, plugin source, or log. Worker installation does not need it.',
             '4. If `reload_plugins` is available, use it yourself after publishing the worker and confirm `orc_setup_project` is active. Only if no supported reload tool is available, ask me to run “plugins: reload” once. Then continue in this same thread and call `orc_setup_project` with the fields below.',

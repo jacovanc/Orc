@@ -43,6 +43,17 @@ class AmpLaunchPayload
             ->get()
             ->filter(fn ($candidate) => ($candidate->stage->config['agent_mode'] ?? null) === 'real_merge')
             ->count();
+        $agentMode = $attempt->stage->config['agent_mode'] ?? 'proof_'.$attempt->stage->key;
+        $taskInstruction = $run->stageInstructions()
+            ->where('agent_mode', $agentMode)
+            ->first();
+        $humanReviewEnteredAt = $run->stageRuns()
+            ->with('stage')
+            ->where('attempt_number', '<', $attempt->attempt_number)
+            ->latest('attempt_number')
+            ->get()
+            ->first(fn ($candidate) => $candidate->stage->key === 'human_review')
+            ?->started_at;
         $allowedOutcomes = $attempt->stage->outgoingTransitions
             ->pluck('outcome')
             ->when(
@@ -65,8 +76,7 @@ class AmpLaunchPayload
             'workflow_run_id' => $run->getKey(),
             'stage_key' => $attempt->stage->key,
             'stage_name' => $attempt->stage->name,
-            'agent_mode' => $attempt->stage->config['agent_mode']
-                ?? 'proof_'.$attempt->stage->key,
+            'agent_mode' => $agentMode,
             'attempt_number' => $attempt->attempt_number,
             'github_repository' => $run->github_repository,
             'github_issue_number' => $run->github_issue_number,
@@ -83,6 +93,9 @@ class AmpLaunchPayload
             'approved_pull_request_head_sha' => $approvedQa?->github_pull_request_head_sha,
             'merge_review_cycles' => $mergeReviewCycles,
             'allowed_outcomes' => $allowedOutcomes,
+            'task_instruction_body' => $taskInstruction?->body,
+            'task_instruction_version' => $taskInstruction?->source_version,
+            'human_review_entered_at' => $humanReviewEnteredAt?->toISOString(),
         ];
     }
 }

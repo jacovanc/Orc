@@ -90,13 +90,13 @@ Laravel Cloud needs a database because workflow state and authentication are per
 - build command: `composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader && npm ci --audit false && npm run build`
 - deploy command: `php artisan migrate --force && php artisan db:seed --force`
 
-The seed is idempotent and preserves immutable workflows v1–v3 while creating Merge workflow v4. Production also needs a supervised `php artisan queue:work database --queue=amp-launches,workflow-notifications` process. Mailgun activation is documented in [Workflow attention email](docs/email-notifications.md). Do not put Amp credentials into source control; GitHub access remains native user-configured Orb state, never Orc configuration.
+The seed is idempotent and preserves immutable workflows v1–v4 while creating workflow v5 with the optional Human Review Explanation loop and versioned run-start task instructions. Production also needs a supervised `php artisan queue:work database --queue=amp-launches,workflow-notifications` process. Mailgun activation is documented in [Workflow attention email](docs/email-notifications.md). Do not put Amp credentials into source control; GitHub access remains native user-configured Orb state, never Orc configuration.
 
 Deployment status and exact verification evidence are recorded in [IMPLEMENTATION.md](IMPLEMENTATION.md).
 
 ## Current limitations
 
-- Workflow definition v1 retains the harmless Development/QA integration proof. Definition v2 retains live-proven real Development with explicitly proof-only QA. Definition v3 adds independent substantive QA with remediation/operator loops. Definition v4 adds policy-bound Merge after Human Review; older verified controller connections must be re-paired as protocol 2 before v4 is available.
+- Workflow definition v1 retains the harmless Development/QA integration proof. Definition v2 retains live-proven real Development with explicitly proof-only QA. Definition v3 adds independent substantive QA with remediation/operator loops. Definition v4 adds policy-bound Merge after Human Review. Definition v5 adds Ask questions through a fresh read-only Explanation agent and immutable project task-body snapshots; older verified controller connections must be re-paired as protocol 3 before v5 is available.
 - Self-registration is source-default-disabled and production returns 404 for `/register`. Amp launches independently require the authenticated owner's immutable `can_trigger_amp` permission and a verified Project connection, so registration or profile-email changes cannot grant access to the owner's Amp account.
 - Agents retain normal Amp shell, editing, web, MCP, and other default tools. Orc adds workflow tools and enforces authority at Laravel's orchestration boundary rather than by suppressing tools.
 - A per-launch capability replaces broad callback credentials in fresh coding Orbs. It is bound to one attempt/thread and cannot grant repository access.
@@ -105,7 +105,7 @@ Deployment status and exact verification evidence are recorded in [IMPLEMENTATIO
 - Any change feedback is published manually on GitHub. Orc requires no feedback URL or confirmation before a human chooses Request Changes or Approve.
 - A running agent can be stopped without permanently cancelling its workflow. Owners can move running, paused, or failed runs to any non-terminal stage in the run's frozen definition; Orc closes the old attempt, cancels its bound thread, creates a new numbered attempt, and records structured append-only events. Manual entry into Human Review is explicitly labelled and never presented as a QA pass.
 - Project connection changes create new versions. Existing runs, retries, QA, reconciliation, and cancellation stay bound to their original connection. A real second-project placement proof still requires a second user-configured Amp project.
-- There is no workflow editor. Definitions are seeded and versioned in code/database.
+- There is no workflow-graph editor. Definitions are seeded and versioned in code/database; Project owners may version the substantive task body for each real agent role, affecting new runs only.
 - Real Development has a completed controlled public-repository acceptance on documentation issue `jacovanc/Orc#2`; Orc left its pull request open, the user merged it directly on GitHub, then separately approved the Orc Human Review. This does not prove private-repository operation.
 - QA has normal tools for inspection/testing but no Orc publication capability and is instructed never to change/push implementation. Native repository permissions are user-owned, so this is a workflow rule rather than a fake sandbox boundary.
 - Merge has not yet been exercised against a live user-authorized pull request. No PR was merged merely to test this release.

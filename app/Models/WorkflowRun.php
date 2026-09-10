@@ -76,4 +76,9 @@ class WorkflowRun extends Model
     {
         return $this->hasMany(WorkflowEvent::class)->orderBy('happened_at')->orderBy('id');
     }
+
+    public function stageInstructions(): HasMany
+    {
+        return $this->hasMany(WorkflowRunStageInstruction::class);
+    }
 }

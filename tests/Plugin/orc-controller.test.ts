@@ -17,7 +17,7 @@ function launch(overrides: Record<string, unknown> = {}) {
 		project_id: 1,
 		connection_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		amp_project_id: 'amp-project-test',
-		controller_key: 'orc-stage-launch-v12-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+		controller_key: 'orc-stage-launch-v13-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		callback_url: 'https://orc.test/api/integrations/amp/connections/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		event_id: '11111111-1111-4111-8111-111111111111',
 		idempotency_key: '22222222-2222-4222-8222-222222222222',
@@ -36,11 +36,13 @@ function launch(overrides: Record<string, unknown> = {}) {
 		expected_branch: 'orc/stage-41-attempt-1',
 		merge_review_cycles: 0,
 		allowed_outcomes: ['success', 'blocked'],
+		task_instruction_body: 'Implement the exact issue and test it.',
+		task_instruction_version: 1,
 		...overrides,
 	}
 }
 
-async function controllerHarness(testName: string, holdResponses = false, controllerProtocolVersion: number | null = 2) {
+async function controllerHarness(testName: string, holdResponses = false, controllerProtocolVersion: number | null = 3) {
 	process.env.AMP_PROJECT_ID = 'amp-project-test'
 	const root = `/tmp/orc-controller-${testName}`
 	rmSync(root, { recursive: true, force: true })
@@ -61,6 +63,7 @@ async function controllerHarness(testName: string, holdResponses = false, contro
 	let createThreadOptions: Record<string, unknown> | undefined
 	let cancelled = 0
 	let prompted = 0
+	const promptBodies: string[] = []
 	let monitorWaiting = false
 	let monitorWasWaitingWhenPrompted = false
 	let agentEndHandler: ((event: Record<string, any>) => Promise<unknown>) | undefined
@@ -68,9 +71,10 @@ async function controllerHarness(testName: string, holdResponses = false, contro
 	const thread = {
 		id: 'T-00000000-0000-0000-0000-000000000041',
 		cancel: async () => { cancelled++ },
-		appendUserMessage: async () => {
+		appendUserMessage: async (message: { content?: string }) => {
 			monitorWasWaitingWhenPrompted = monitorWaiting
 			prompted++
+			promptBodies.push(String(message.content ?? ''))
 		},
 		messages: async () => [],
 		waitForResponse: async () => {
@@ -144,6 +148,7 @@ async function controllerHarness(testName: string, holdResponses = false, contro
 		createThreadOptions: () => createThreadOptions,
 		failCreateThread: (error: Error) => { createThreadError = error },
 		monitorWasWaitingWhenPrompted: () => monitorWasWaitingWhenPrompted,
+		promptBodies: () => promptBodies,
 		invokeAgentEnd: async (status: string) => {
 			if (!agentEndHandler) throw new Error('Controller did not register agent.end.')
 			return agentEndHandler({ thread: { id: thread.id }, status })
@@ -239,11 +244,12 @@ describe('Orc controller agent configuration', () => {
 		} as never)
 		await new Promise((resolve) => setTimeout(resolve, 0))
 
-		expect(agentConfigs).toHaveLength(5)
+		expect(agentConfigs).toHaveLength(6)
 		expect(modes.map((mode) => mode.key)).toEqual([
 			'orc-proof-agent',
 			'orc-development-agent',
 			'orc-qa-agent',
+			'orc-explanation-agent',
 			'orc-connection-verifier',
 			'orc-merge-agent',
 		])
@@ -256,17 +262,16 @@ describe('Orc controller agent configuration', () => {
 		expect(agentConfigs[0].tools.add).toEqual(['workflow_complete'])
 		expect(agentConfigs[1].tools.add).toEqual(['workflow_complete'])
 		expect(agentConfigs[1].model).toBe('openai/gpt-5.6-sol')
-		expect(agentConfigs[1].instructions).toContain('origin may be an Amp-hosted project remote')
-		expect(agentConfigs[1].instructions).toContain('normal Amp toolset')
+		expect(agentConfigs[1].instructions).toContain('normal Amp tools')
 		expect(agentConfigs[2].tools.add).toEqual(['workflow_complete'])
 		expect(agentConfigs[2].model).toBe('openai/gpt-5.6-sol')
-		expect(agentConfigs[2].instructions).toContain('Do not change implementation files')
-		expect(agentConfigs[2].instructions).toContain('normal native gh')
+		expect(agentConfigs[2].instructions).toContain('do not edit implementation')
 		expect(agentConfigs[3].tools.add).toEqual(['workflow_complete'])
 		expect(agentConfigs[3].model).toBe('openai/gpt-5.6-sol')
-		expect(agentConfigs[3].instructions).toContain('Never bypass branch protection')
-		expect(agentConfigs[3].instructions).toContain('gh merge behavior')
-		expect(agentConfigs[4].tools.add).toEqual(['workflow_verify_project_connection'])
+		expect(agentConfigs[3].instructions).toContain('do not edit, commit, push, merge')
+		expect(agentConfigs[4].tools.add).toEqual(['workflow_complete'])
+		expect(agentConfigs[4].instructions).toContain('never bypass repository policy')
+		expect(agentConfigs[5].tools.add).toEqual(['workflow_verify_project_connection'])
 		rmSync(root, { recursive: true, force: true })
 	})
 
@@ -286,8 +291,8 @@ describe('Orc controller agent configuration', () => {
 
 	test('marks a claimed launch without a durable thread ambiguous instead of creating a duplicate Orb', async () => {
 		const harness = await controllerHarness('claimed-without-thread')
-		expect(harness.webhookKey()).toBe('orc-stage-launch-v12-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
-		expect(harness.webhookKeys()).toEqual(['orc-stage-launch-v12-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'])
+		expect(harness.webhookKey()).toBe('orc-stage-launch-v13-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+		expect(harness.webhookKeys()).toEqual(['orc-stage-launch-v13-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'])
 		const callbackTypes: string[] = []
 		const controllerThreads: unknown[] = []
 		globalThis.fetch = (async (_input, init) => {
@@ -306,6 +311,67 @@ describe('Orc controller agent configuration', () => {
 		expect(controllerThreads).toEqual(['T-controller', 'T-controller'])
 		expect(harness.counts()).toEqual({ createThreadCalls: 0, cancelled: 0, prompted: 0 })
 		rmSync(harness.root, { recursive: true, force: true })
+	})
+
+	test('delivers the exact snapshotted task body separately from the fixed stage envelope', async () => {
+		const harness = await controllerHarness('task-body-delivery')
+		const customBody = 'Inspect the widget renderer.\nRun only its focused browser test.'
+		let contextCalls = 0
+		globalThis.fetch = (async (_input, init) => {
+			const payload = JSON.parse(String(init?.body))
+			if (payload.type === 'launch.claim') return Response.json({
+				accepted: true,
+				launch: false,
+				is_active: true,
+				thread_id: 'T-00000000-0000-0000-0000-000000000041',
+			})
+			if (payload.type === 'launch.acknowledged') return Response.json({ accepted: true })
+			if (payload.action === 'context') return Response.json({
+				...launch({ task_instruction_body: customBody, task_instruction_version: 7 }),
+				thread_id: 'T-00000000-0000-0000-0000-000000000041',
+				completed: false,
+				is_active: contextCalls++ === 0,
+			})
+			throw new Error(`Unexpected callback: ${JSON.stringify(payload)}`)
+		}) as typeof fetch
+
+		await harness.invoke(launch({ task_instruction_body: customBody, task_instruction_version: 7 }))
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		expect(harness.promptBodies()).toHaveLength(1)
+		expect(harness.promptBodies()[0]).toContain('TASK BODY v7')
+		expect(harness.promptBodies()[0]).toContain(customBody)
+		expect(harness.promptBodies()[0].match(/Inspect the widget renderer\./g)).toHaveLength(1)
+		expect(harness.promptBodies()[0]).toContain('Capability token:')
+		rmSync(harness.root, { recursive: true, force: true })
+	})
+
+	test('rejects Explanation on protocol two and missing task snapshots on protocol three', async () => {
+		const protocolTwo = await controllerHarness('protocol-two-explanation', false, 2)
+		const protocolThree = await controllerHarness('protocol-three-missing-snapshot')
+		let fetchCalls = 0
+		globalThis.fetch = (async () => {
+			fetchCalls++
+			return Response.json({ accepted: false })
+		}) as typeof fetch
+
+		await expect(protocolTwo.invoke(launch({
+			controller_key: 'orc-stage-launch-v12-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+			agent_mode: 'real_explanation',
+			allowed_outcomes: ['completed', 'blocked'],
+		}))).resolves.toBeUndefined()
+		await expect(protocolThree.invoke(launch({
+			task_instruction_body: undefined,
+			task_instruction_version: undefined,
+		}))).resolves.toBeUndefined()
+
+		expect(fetchCalls).toBe(0)
+		expect(protocolTwo.counts()).toEqual({ createThreadCalls: 0, cancelled: 0, prompted: 0 })
+		expect(protocolThree.counts()).toEqual({ createThreadCalls: 0, cancelled: 0, prompted: 0 })
+		expect(protocolTwo.logMessages()).toEqual(['Orc discarded a permanently invalid webhook delivery.'])
+		expect(protocolThree.logMessages()).toEqual(['Orc discarded a permanently invalid webhook delivery.'])
+		rmSync(protocolTwo.root, { recursive: true, force: true })
+		rmSync(protocolThree.root, { recursive: true, force: true })
 	})
 
 	test('acknowledges permanently invalid webhook input without blocking later valid commands', async () => {

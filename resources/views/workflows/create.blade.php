@@ -14,6 +14,11 @@
                 <strong class="text-amber-200">Merge workflow unavailable on this connection.</strong>
                 Pair an updated controller from <a class="underline decoration-amber-300/30 underline-offset-2" href="{{ route('projects.settings', $project) }}">Project settings</a> to start workflow v4. Existing definitions remain available and existing runs are unchanged.
             </div>
+        @elseif (! $supportsExplanation)
+            <div class="mt-6 rounded-2xl border border-amber-300/20 bg-amber-300/[0.07] px-5 py-4 text-sm leading-6 text-amber-100/80">
+                <strong class="text-amber-200">Explanation workflow unavailable on this connection.</strong>
+                Pair the latest controller from <a class="underline decoration-amber-300/30 underline-offset-2" href="{{ route('projects.settings', $project) }}">Project settings</a> to start workflow v5. Workflow v4 remains available and existing runs are unchanged.
+            </div>
         @endif
 
         <form method="POST" action="{{ route('projects.workflows.store', $project) }}" class="panel mt-10 overflow-hidden">

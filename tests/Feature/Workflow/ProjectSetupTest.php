@@ -44,13 +44,13 @@ class ProjectSetupTest extends TestCase
 
     public function test_versioned_worker_is_a_public_immutable_three_tool_artifact(): void
     {
-        $source = (string) file_get_contents(resource_path('amp/orc-worker-v2.ts'));
+        $source = (string) file_get_contents(resource_path('amp/orc-worker-v3.ts'));
         $this->assertSame(3, substr_count($source, 'amp.registerTool({'));
         $this->assertStringNotContainsString('GH_TOKEN', $source);
         $this->assertStringNotContainsString('GITHUB_TOKEN', $source);
         $this->assertStringNotContainsString('ORC_GITHUB_TOKEN', $source);
 
-        $this->get(route('integrations.amp.worker-plugin-v2'))
+        $this->get(route('integrations.amp.worker-plugin-v3'))
             ->assertOk()
             ->assertHeader('Content-Type', 'text/plain; charset=UTF-8')
             ->assertHeader('Cache-Control', 'immutable, max-age=31536000, public')
@@ -58,7 +58,13 @@ class ProjectSetupTest extends TestCase
             ->assertHeader('X-Content-Type-Options', 'nosniff')
             ->assertSee('orc_setup_project', false)
             ->assertSee('workflow_verify_project_connection', false)
-            ->assertSee('workflow_complete', false);
+            ->assertSee('workflow_complete', false)
+            ->assertSee("'completed'", false)
+            ->assertSee('real_explanation', false);
+
+        $this->get(route('integrations.amp.worker-plugin-v2'))
+            ->assertOk()
+            ->assertDontSee('real_explanation', false);
     }
 
     public function test_project_creation_preallocates_connection_and_copyable_setup_prompt(): void
@@ -76,7 +82,7 @@ class ProjectSetupTest extends TestCase
         $this->assertNull($project->currentConnection->amp_project_id);
         $this->assertSame('setup_pending', $project->currentConnection->status);
         $this->assertSame(
-            'orc-stage-launch-v12-'.$project->currentConnection->public_id,
+            'orc-stage-launch-v13-'.$project->currentConnection->public_id,
             $project->currentConnection->controller_key,
         );
         $this->assertNotNull($project->current_amp_project_connection_id);
@@ -98,8 +104,8 @@ class ProjectSetupTest extends TestCase
             ->assertSee('Personal User Plugins repository')
             ->assertSee('reload_plugins')
             ->assertSee('Only if no supported reload tool is available')
-            ->assertSee(route('integrations.amp.worker-plugin-v2'), false)
-            ->assertSee(hash('sha256', (string) file_get_contents(resource_path('amp/orc-worker-v2.ts'))))
+            ->assertSee(route('integrations.amp.worker-plugin-v3'), false)
+            ->assertSee(hash('sha256', (string) file_get_contents(resource_path('amp/orc-worker-v3.ts'))))
             ->assertSee($setup->public_id)
             ->assertSee(route('docs.project-setup-v1'))
             ->assertDontSee('github.com/jacovanc/Orc/blob', false)
@@ -178,7 +184,7 @@ class ProjectSetupTest extends TestCase
             'action' => 'complete',
             'launch_webhook_url' => 'https://hooks.ampcode.com/project-controller',
             'controller_source_sha256' => $sourceHash,
-            'controller_protocol_version' => 2,
+            'controller_protocol_version' => 3,
         ];
         $this->withToken($setup->token)
             ->postJson('/api/integrations/amp/project-setup', $completePayload)
@@ -226,7 +232,7 @@ class ProjectSetupTest extends TestCase
             'amp_project_id' => 'amp-project-one',
             'launch_webhook_url' => 'https://hooks.ampcode.com/project-controller-owner-test',
             'controller_source_sha256' => $claim->json('controller_source_sha256'),
-            'controller_protocol_version' => 2,
+            'controller_protocol_version' => 3,
         ])->assertOk();
         $connection = $project->currentConnection->fresh();
 
@@ -401,7 +407,7 @@ class ProjectSetupTest extends TestCase
         $this->assertSame(2, $new['connection']->version);
         $this->assertNotSame($project->currentConnection->controller_key, $new['connection']->controller_key);
         $this->assertSame(
-            'orc-stage-launch-v12-'.$new['connection']->public_id,
+            'orc-stage-launch-v13-'.$new['connection']->public_id,
             $new['connection']->controller_key,
         );
         $this->assertSame('pending', $new['setup']->status);
@@ -439,7 +445,7 @@ class ProjectSetupTest extends TestCase
             'action' => 'complete',
             'launch_webhook_url' => 'https://hooks.ampcode.com/project-controller',
             'controller_source_sha256' => $claim->json('controller_source_sha256'),
-            'controller_protocol_version' => 2,
+            'controller_protocol_version' => 3,
         ])->assertConflict();
 
         $this->assertSame('claimed', $setup->fresh()->status);

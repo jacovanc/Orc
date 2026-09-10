@@ -39,7 +39,7 @@ class MergeWorkflowTest extends TestCase
     {
         $definitions = WorkflowDefinition::query()->with(['stages', 'transitions'])->orderBy('version')->get();
 
-        $this->assertSame([1, 2, 3, 4], $definitions->pluck('version')->all());
+        $this->assertSame([1, 2, 3, 4, 5], $definitions->pluck('version')->all());
         $this->assertSame(['development', 'qa', 'human_review', 'done'], $definitions[0]->stages->pluck('key')->all());
         $this->assertSame(
             ['development', 'qa', 'development_blocked', 'qa_blocked', 'human_review', 'done'],

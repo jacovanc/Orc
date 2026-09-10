@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Domain\Workflow\Exceptions\WorkflowConflict;
 use App\Models\Project;
 use App\Services\AmpProjectConnectionService;
+use App\Services\StageTaskInstructionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -13,7 +14,10 @@ use Illuminate\View\View;
 
 class ProjectController extends Controller
 {
-    public function __construct(private readonly AmpProjectConnectionService $connections) {}
+    public function __construct(
+        private readonly AmpProjectConnectionService $connections,
+        private readonly StageTaskInstructionService $taskInstructions,
+    ) {}
 
     public function index(Request $request): View
     {
@@ -73,8 +77,10 @@ class ProjectController extends Controller
         $setupPrompt = $setup && in_array($setup->status, ['pending', 'claimed'], true) && ! $setup->isExpired()
             ? $this->connections->setupPrompt($setup)
             : null;
+        $stageInstructions = collect(array_keys($this->taskInstructions->modes()))
+            ->map(fn (string $mode) => $this->taskInstructions->current($project, $mode));
 
-        return view('projects.settings', compact('project', 'setup', 'setupPrompt'));
+        return view('projects.settings', compact('project', 'setup', 'setupPrompt', 'stageInstructions'));
     }
 
     public function issueSetup(Request $request, Project $project): RedirectResponse
@@ -122,6 +128,29 @@ class ProjectController extends Controller
         }
 
         return back()->with('status', 'Verification queued. Refresh shortly to see the fresh-Orb placement and native GitHub access result.');
+    }
+
+    public function updateStageInstruction(Request $request, Project $project): RedirectResponse
+    {
+        $this->assertOwner($request, $project);
+        abort_unless($request->user()->can_trigger_amp, 403);
+        $data = $request->validate([
+            'agent_mode' => ['required', 'string', Rule::in(array_keys($this->taskInstructions->modes()))],
+            'body' => ['required', 'string', 'max:'.StageTaskInstructionService::MAX_BODY_LENGTH],
+        ]);
+
+        try {
+            $version = $this->taskInstructions->update(
+                $project,
+                $request->user(),
+                $data['agent_mode'],
+                $data['body'],
+            );
+        } catch (WorkflowConflict $exception) {
+            return back()->withErrors(['instructions' => $exception->getMessage()]);
+        }
+
+        return back()->with('status', "{$this->taskInstructions->modes()[$data['agent_mode']]['label']} task body v{$version->version} saved. New workflows will use it; active runs keep their snapshots.");
     }
 
     private function assertOwner(Request $request, Project $project): void
