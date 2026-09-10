@@ -13,7 +13,7 @@ Before allowing an administrator to start Amp-backed workflows, complete the
 - Seeded Development → QA → Human Review → Done graph, including QA and change-request loops.
 - A central transactional `WorkflowEngine` with row locks, expected-attempt checks, idempotent duplicate completions, monotonic attempt numbers, and a database-enforced single-active-attempt slot.
 - Append-only workflow events and stable historical stage attempts.
-- Authenticated list, manual start, detail, status, stage graph, attempt table, event timeline, GitHub links, human actions, and cancellation pages.
+- Authenticated list, manual start, detail, status, stage graph, attempt table, event timeline, GitHub links, human actions, cancellation, and audited stop/stage-override controls.
 - Durable queued Amp launches with bounded retries, stable idempotency keys, explicit ambiguous outcomes, persistent callback deduplication, and separate delivery/business state.
 - A trusted project-local Amp controller plus a secretless global User Plugin worker. Agents retain normal tools and gain stage-bound workflow tools in one fresh private thread and Orb per attempt.
 - Independent QA bound to the exact Development pull request, including fresh issue/PR/review/CI reads, substantive PR reports, fail-to-remediation loops, and a human gate for blocked verdicts.
@@ -73,7 +73,7 @@ vendor/bin/pint --test
 npm run build
 ```
 
-Workflow coverage includes the seeded graph, forward transitions, QA and review loops, attempt numbering, idempotent and competing completions, stale attempts, invalid outcomes, cancellation, human-action restrictions, link-free human approval/change requests, event immutability, ownership, request validation, and the database active-attempt constraint. Integration coverage additionally exercises signed callbacks, stable launch retries, persistent claims and callback deduplication, callback-before-response ordering, foreign threads, cancelled/stale attempts, agent failures, and permanent versus ambiguous delivery outcomes.
+Workflow coverage includes the seeded graph, forward transitions, QA and review loops, attempt numbering, idempotent and competing completions, stale attempts, invalid outcomes, cancellation, audited pause/manual movement, failed-run recovery, immutable terminal states, manual QA prerequisites, human-action restrictions, link-free human approval/change requests, event immutability, ownership, request validation, and the database active-attempt constraint. Integration coverage additionally exercises signed callbacks, stable launch retries, persistent claims and callback deduplication, callback-before-response ordering, foreign threads, cancelled/stale attempts, agent failures, and permanent versus ambiguous delivery outcomes.
 
 ## Deployment
 
@@ -101,6 +101,7 @@ Deployment status and exact verification evidence are recorded in [IMPLEMENTATIO
 - Reports use an unguessable per-launch nonce, native GitHub author and exact-target checks, and durable Laravel attestation before completion.
 - A crash in the narrow interval after Amp creates a thread but before Laravel receives its thread ID leaves the launch claimed for manual reconciliation. Orc deliberately does not risk a duplicate Orb.
 - Any change feedback is published manually on GitHub. Orc requires no feedback URL or confirmation before a human chooses Request Changes or Approve.
+- A running agent can be stopped without permanently cancelling its workflow. Owners can move running, paused, or failed runs to any non-terminal stage in the run's frozen definition; Orc closes the old attempt, cancels its bound thread, creates a new numbered attempt, and records structured append-only events. Manual entry into Human Review is explicitly labelled and never presented as a QA pass.
 - Project connection changes create new versions. Existing runs, retries, QA, reconciliation, and cancellation stay bound to their original connection. A real second-project placement proof still requires a second user-configured Amp project.
 - There is no workflow editor. Definitions are seeded and versioned in code/database.
 - Real Development has a completed controlled public-repository acceptance on documentation issue `jacovanc/Orc#2`; Orc left its pull request open, the user merged it directly on GitHub, then separately approved the Orc Human Review. This does not prove private-repository operation.

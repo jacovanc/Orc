@@ -50,6 +50,10 @@ Route::middleware('auth')->group(function () {
         ->name('workflows.attempts.simulate');
     Route::post('/workflows/{workflowRun}/attempts/{stageRun}/human-action', [WorkflowController::class, 'humanAction'])
         ->name('workflows.attempts.human-action');
+    Route::post('/workflows/{workflowRun}/attempts/{stageRun}/pause', [WorkflowController::class, 'pause'])
+        ->name('workflows.attempts.pause');
+    Route::post('/workflows/{workflowRun}/attempts/{stageRun}/override-stage', [WorkflowController::class, 'overrideStage'])
+        ->name('workflows.attempts.override-stage');
     Route::post('/workflows/{workflowRun}/cancel', [WorkflowController::class, 'cancel'])
         ->name('workflows.cancel');
 

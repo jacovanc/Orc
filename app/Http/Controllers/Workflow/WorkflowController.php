@@ -6,6 +6,7 @@ use App\Domain\Workflow\Exceptions\WorkflowConflict;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Workflow\CompleteAttemptRequest;
 use App\Http\Requests\Workflow\HumanActionRequest;
+use App\Http\Requests\Workflow\ManualStageOverrideRequest;
 use App\Http\Requests\Workflow\StartWorkflowRequest;
 use App\Models\Project;
 use App\Models\StageRun;
@@ -146,6 +147,43 @@ class WorkflowController extends Controller
         }
 
         return back()->with('status', 'Review decision recorded.');
+    }
+
+    public function pause(
+        Request $request,
+        WorkflowRun $workflowRun,
+        StageRun $stageRun,
+    ): RedirectResponse {
+        $this->assertOwner($request, $workflowRun);
+
+        try {
+            $this->engine->pause($workflowRun, $stageRun, $request->user());
+        } catch (WorkflowConflict $exception) {
+            return back()->withErrors(['workflow' => $exception->getMessage()]);
+        }
+
+        return back()->with('status', 'Current attempt stopped. Choose a stage when you are ready to resume.');
+    }
+
+    public function overrideStage(
+        ManualStageOverrideRequest $request,
+        WorkflowRun $workflowRun,
+        StageRun $stageRun,
+    ): RedirectResponse {
+        $this->assertOwner($request, $workflowRun);
+
+        try {
+            $run = $this->engine->overrideStage(
+                $workflowRun,
+                $stageRun,
+                $request->integer('target_stage_id'),
+                $request->user(),
+            );
+        } catch (WorkflowConflict $exception) {
+            return back()->withInput()->withErrors(['workflow' => $exception->getMessage()]);
+        }
+
+        return back()->with('status', 'Workflow moved to '.$run->currentStage->name.' with a new audited attempt.');
     }
 
     public function cancel(Request $request, WorkflowRun $workflowRun): RedirectResponse

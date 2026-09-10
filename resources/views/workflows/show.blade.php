@@ -7,6 +7,24 @@
         $ampEnabled = (bool) config('services.amp.enabled');
         $activeLaunch = $active?->ampLaunch;
         $activeMode = $active?->stage?->config['agent_mode'] ?? null;
+        $controlAttempt = $active ?: (
+            in_array($run->status, [
+                \App\Domain\Workflow\WorkflowStatus::Paused,
+                \App\Domain\Workflow\WorkflowStatus::Failed,
+            ], true)
+                ? $run->stageRuns->sortByDesc('attempt_number')->first()
+                : null
+        );
+        $manualDestinations = $run->definition->stages
+            ->reject(fn ($stage) => $stage->type === \App\Domain\Workflow\StageType::Terminal)
+            ->sortBy('position');
+        $manualEntryEvent = $active
+            ? $run->events->first(fn ($event) =>
+                $event->stage_run_id === $active->id
+                && $event->type === 'stage.started'
+                && ($event->metadata['source'] ?? null) === 'manual_override'
+            )
+            : null;
         $awaitingController = $ampEnabled
             && $active?->stage?->type === \App\Domain\Workflow\StageType::Agent
             && $activeLaunch?->launch_status === \App\Domain\Workflow\AmpLaunchStatus::Pending
@@ -35,10 +53,10 @@
                 <a href="{{ $run->github_issue_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-zinc-300 transition hover:text-orange-300">Open issue <span>↗</span></a>
             </div>
         </div>
-        @if ($run->status === \App\Domain\Workflow\WorkflowStatus::Running)
+        @if (in_array($run->status, [\App\Domain\Workflow\WorkflowStatus::Running, \App\Domain\Workflow\WorkflowStatus::Paused], true))
             <form method="POST" action="{{ route('workflows.cancel', $run) }}" onsubmit="return confirm('Cancel this workflow? This cannot be resumed.')">
                 @csrf
-                <button class="button-danger" type="submit">Cancel workflow</button>
+                <button class="button-danger" type="submit">Cancel entire workflow</button>
             </form>
         @endif
     </div>
@@ -177,7 +195,11 @@
                             </div>
                         @endif
                     @else
-                        @if ($run->definition->version === 2 && $active->stage->key === 'human_review')
+                        @if ($active->stage->key === 'human_review' && $manualEntryEvent)
+                            <div class="mb-4 rounded-xl border border-sky-300/20 bg-sky-300/[0.07] px-4 py-3 text-xs leading-5 text-sky-100/80">
+                                <strong class="text-sky-200">Manual review entry.</strong> You moved this workflow here directly. No QA result is implied; inspect GitHub before making the human release decision.
+                            </div>
+                        @elseif ($run->definition->version === 2 && $active->stage->key === 'human_review')
                             <div class="mb-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-xs leading-5 text-amber-100/80">
                                 <strong class="text-amber-200">Human release gate.</strong> QA was an integration proof only; no independent substantive code validation has occurred yet.
                             </div>
@@ -231,6 +253,54 @@
             <p class="font-mono text-xs uppercase tracking-[0.16em] text-red-300">Workflow failed</p>
             <h2 class="mt-3 text-2xl font-semibold text-white">Agent launch or execution could not complete safely</h2>
             <p class="mt-2 text-sm text-zinc-500">No transition was taken. Inspect the immutable attempt and event history below.</p>
+        </section>
+    @elseif ($run->status === \App\Domain\Workflow\WorkflowStatus::Paused)
+        <section class="mt-6 rounded-3xl border border-sky-300/20 bg-sky-300/[0.06] p-7 sm:p-9">
+            <p class="font-mono text-xs uppercase tracking-[0.16em] text-sky-200">Workflow paused</p>
+            <h2 class="mt-3 text-2xl font-semibold text-white">The previous attempt was stopped safely</h2>
+            <p class="mt-2 text-sm text-zinc-500">Choose any actionable stage below to resume with a new numbered attempt. Existing attempts and events remain unchanged.</p>
+        </section>
+    @endif
+
+    @if ($controlAttempt && in_array($run->status, [
+        \App\Domain\Workflow\WorkflowStatus::Running,
+        \App\Domain\Workflow\WorkflowStatus::Paused,
+        \App\Domain\Workflow\WorkflowStatus::Failed,
+    ], true))
+        <section class="panel mt-6 overflow-hidden">
+            <div class="grid gap-0 lg:grid-cols-[.8fr_1.2fr]">
+                <div class="border-b border-white/[0.07] p-6 sm:p-7 lg:border-b-0 lg:border-r">
+                    <div class="eyebrow"><span></span> Manual controls</div>
+                    <h2 class="mt-4 text-xl font-semibold text-white">Recover or redirect this run</h2>
+                    <p class="mt-2 text-sm leading-6 text-zinc-500">Use these controls to recover from an accidental decision or deliberately skip a stage. Orc never rewrites completed attempts.</p>
+
+                    @if ($run->status === \App\Domain\Workflow\WorkflowStatus::Running && $controlAttempt->stage->type === \App\Domain\Workflow\StageType::Agent)
+                        <form class="mt-5" method="POST" action="{{ route('workflows.attempts.pause', [$run, $controlAttempt]) }}" onsubmit="return confirm('Stop this agent attempt and pause the workflow?')">
+                            @csrf
+                            <button class="button-danger" type="submit">Stop current agent</button>
+                            <p class="mt-2 text-xs leading-5 text-zinc-600">Sends a cancellation command to the bound Amp thread when one exists. The workflow remains resumable.</p>
+                        </form>
+                    @endif
+                </div>
+                <div class="p-6 sm:p-7">
+                    <form method="POST" action="{{ route('workflows.attempts.override-stage', [$run, $controlAttempt]) }}" onsubmit="return confirm('Move this workflow to the selected stage? This creates a new audited attempt.')">
+                        @csrf
+                        <label class="field-label" for="target_stage_id">Move to stage</label>
+                        <select class="field-input" id="target_stage_id" name="target_stage_id" required>
+                            <option value="" disabled @selected(! old('target_stage_id'))>Choose a stage…</option>
+                            @foreach ($manualDestinations as $destination)
+                                <option value="{{ $destination->id }}" @selected((int) old('target_stage_id') === $destination->id)>
+                                    {{ $destination->name }} · {{ str($destination->type->value)->title() }}
+                                </option>
+                            @endforeach
+                        </select>
+                        <p class="field-help">Agent stages start a fresh thread and Orb and may spend tokens. Human Review waits for your decision. To finish, move to Human Review and use Approve.</p>
+                        <button class="button-primary mt-5" type="submit">
+                            {{ $run->status === \App\Domain\Workflow\WorkflowStatus::Running ? 'Stop & move' : 'Resume at stage' }}
+                        </button>
+                    </form>
+                </div>
+            </div>
         </section>
     @endif
 
@@ -298,6 +368,8 @@
                         $eventDotClass = match ($event->type) {
                             'workflow.completed' => 'bg-emerald-400',
                             'workflow.cancelled' => 'bg-zinc-400',
+                            'workflow.paused' => 'bg-sky-300',
+                            'workflow.stage_overridden' => 'bg-sky-300',
                             default => 'bg-orange-400',
                         };
                     @endphp
@@ -313,6 +385,11 @@
                                 @if (isset($event->metadata['attempt_number'])) · attempt {{ $event->metadata['attempt_number'] }} @endif
                                 @if (isset($event->metadata['outcome'])) · {{ str($event->metadata['outcome'])->replace('_', ' ') }} @endif
                                 @if (isset($event->metadata['source']) && $event->metadata['source'] === 'agent_simulation') · simulated @endif
+                                @if ($event->type === 'workflow.stage_overridden' && isset($event->metadata['from_stage_key'], $event->metadata['to_stage_key']))
+                                    {{ str($event->metadata['from_stage_key'])->replace('_', ' ')->title() }} attempt {{ $event->metadata['from_attempt_number'] ?? '—' }}
+                                    → {{ str($event->metadata['to_stage_key'])->replace('_', ' ')->title() }} attempt {{ $event->metadata['to_attempt_number'] ?? '—' }}
+                                @endif
+                                @if (($event->metadata['source'] ?? null) === 'manual_override') · manual move @endif
                             </p>
                             @if (isset($event->metadata['github_feedback_url']))
                                 <a class="mt-2 inline-flex text-xs text-orange-300 hover:text-orange-200" href="{{ $event->metadata['github_feedback_url'] }}" target="_blank" rel="noopener">Open GitHub feedback ↗</a>

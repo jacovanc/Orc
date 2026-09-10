@@ -13,8 +13,8 @@
         </a>
     </section>
 
-    <section class="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        @foreach ([['running', 'In progress', 'bg-orange-400'], ['completed', 'Completed', 'bg-emerald-400'], ['failed', 'Failed', 'bg-red-400'], ['cancelled', 'Cancelled', 'bg-zinc-400']] as [$key, $label, $dotClass])
+    <section class="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        @foreach ([['running', 'In progress', 'bg-orange-400'], ['paused', 'Paused', 'bg-sky-300'], ['completed', 'Completed', 'bg-emerald-400'], ['failed', 'Failed', 'bg-red-400'], ['cancelled', 'Cancelled', 'bg-zinc-400']] as [$key, $label, $dotClass])
             <div class="panel flex items-center justify-between px-5 py-4">
                 <div>
                     <p class="text-xs font-medium uppercase tracking-[0.12em] text-zinc-600">{{ $label }}</p>

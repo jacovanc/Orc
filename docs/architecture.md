@@ -47,6 +47,12 @@ An immutable numbered attempt at a stage within a workflow run. An attempt has s
 
 An append-only audit record of orchestration facts. Events contain structured identifiers and state-change metadata only, not requirement text, agent prompts, reports, or review feedback. There are no update or delete paths in the application.
 
+### Manual run control
+
+An owner may pause the current agent attempt or manually move a running, paused, or failed run to another non-terminal stage in the same immutable definition. This is an audited run-level override, not an edit to the definition or history: the current attempt is closed, any bound Amp thread receives the existing signed cancellation command, and a new monotonically numbered attempt is created at the selected stage. Completed and cancelled runs remain final, and Done still requires the normal human approval transition.
+
+Manual movement is addressed to the expected attempt ID so duplicate submissions are idempotent and racing agent callbacks become stale. Moving into an agent stage rechecks the owner's immutable Amp permission and the run's original verified connection. Moving directly to Human Review is allowed for recovery or deliberate stage skipping, but the UI labels it as a manual override rather than claiming QA passed. Orc stores only the actor and structured from/to/attempt identifiers in append-only events; it does not invent or store review feedback.
+
 ## Seeded development workflow (version 1)
 
 ```text
@@ -68,13 +74,14 @@ Workflow v2 and v3 are separately frozen definitions documented in [Milestone 6]
 5. Repeating an identical completion request for the same completed attempt is idempotent and returns the unchanged run. A conflicting repeated outcome is rejected.
 6. Outcomes must exist as transitions on the attempt's stage. Entering a terminal stage creates an immediately closed attempt, then completes the workflow.
 7. Attempt numbers are allocated under the run lock from the current (and therefore highest) attempt, so loops retain a monotonically ordered history.
-8. Cancelled, completed, and failed workflows cannot transition. Cancellation is idempotent and closes the current active attempt.
+8. Completed and cancelled workflows cannot transition. Cancellation is idempotent and closes the current active attempt. An audited manual override may recover a failed run without rewriting its failed attempt.
 9. Human actions are accepted only for the current active human attempt and only when permitted by the definition. Approval completes directly; `request_changes` starts one fresh Development attempt whose agent rereads the bound pull request, reviews, inline comments, and discussion from GitHub.
 10. Agent simulation is available only when Amp integration is disabled and is visibly marked as simulation in both the UI and event stream.
+11. Manual pause and stage movement identify the expected attempt, preserve monotonic attempt numbering, reject cross-definition or terminal destinations, and cancel a bound agent thread before queuing any replacement agent attempt.
 
 ## Service and HTTP shape
 
-- A central `WorkflowEngine` owns start, completion, human action, simulation, and cancellation operations.
+- A central `WorkflowEngine` owns start, completion, human action, simulation, pause, audited stage override, and cancellation operations.
 - Thin authenticated controllers validate input, authorize the user, and delegate to the engine.
 - Controllers return 404 unless a route-bound run belongs to the authenticated user; the engine repeats this ownership invariant at the mutation boundary. The seeded workflow definition is shared configuration.
 - Server-rendered Blade pages provide workflow list/start/detail views and require no JavaScript framework.

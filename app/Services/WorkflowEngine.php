@@ -137,6 +137,144 @@ class WorkflowEngine
         );
     }
 
+    public function pause(
+        WorkflowRun $run,
+        StageRun $expectedAttempt,
+        User $actor,
+    ): WorkflowRun {
+        return DB::transaction(function () use ($run, $expectedAttempt, $actor) {
+            $lockedRun = WorkflowRun::query()->lockForUpdate()->findOrFail($run->getKey());
+            $attempt = StageRun::query()
+                ->with('stage')
+                ->lockForUpdate()
+                ->findOrFail($expectedAttempt->getKey());
+
+            $this->assertOwnedBy($lockedRun, $actor);
+            $this->assertAttemptBelongsToRun($lockedRun, $attempt);
+
+            $existing = WorkflowEvent::query()
+                ->where('stage_run_id', $attempt->getKey())
+                ->where('type', 'workflow.paused')
+                ->first();
+            if ($lockedRun->status === WorkflowStatus::Paused && $existing) {
+                return $lockedRun->fresh(['currentStage', 'activeStageRun']);
+            }
+            if ($lockedRun->status !== WorkflowStatus::Running) {
+                throw new WorkflowConflict('Only a running workflow can be paused.');
+            }
+            $this->assertCurrentActiveAttempt($lockedRun, $attempt);
+            if ($attempt->stage->type !== StageType::Agent) {
+                throw new WorkflowConflict('Only an active agent attempt can be stopped and paused.');
+            }
+
+            $now = now();
+            $this->stopAttempt($attempt, $now, 'workflow_paused', 'The current workflow attempt was paused by its owner.');
+            $lockedRun->forceFill(['status' => WorkflowStatus::Paused])->save();
+            $this->recordEvent($lockedRun, $attempt, 'workflow.paused', $actor, [
+                'stage_key' => $attempt->stage->key,
+                'attempt_number' => $attempt->attempt_number,
+            ]);
+
+            return $lockedRun->fresh(['currentStage', 'activeStageRun']);
+        }, 3);
+    }
+
+    public function overrideStage(
+        WorkflowRun $run,
+        StageRun $expectedAttempt,
+        int $destinationStageId,
+        User $actor,
+    ): WorkflowRun {
+        return DB::transaction(function () use ($run, $expectedAttempt, $destinationStageId, $actor) {
+            $lockedRun = WorkflowRun::query()->lockForUpdate()->findOrFail($run->getKey());
+            $attempt = StageRun::query()
+                ->with('stage')
+                ->lockForUpdate()
+                ->findOrFail($expectedAttempt->getKey());
+
+            $this->assertOwnedBy($lockedRun, $actor);
+            $this->assertAttemptBelongsToRun($lockedRun, $attempt);
+
+            $existing = WorkflowEvent::query()
+                ->where('stage_run_id', $attempt->getKey())
+                ->where('type', 'workflow.stage_overridden')
+                ->first();
+            if ($existing) {
+                if ((int) ($existing->metadata['to_stage_id'] ?? 0) === $destinationStageId) {
+                    return $lockedRun->fresh(['currentStage', 'activeStageRun']);
+                }
+
+                throw new WorkflowConflict('This attempt was already moved to a different stage.');
+            }
+
+            if (! in_array($lockedRun->status, [
+                WorkflowStatus::Running,
+                WorkflowStatus::Paused,
+                WorkflowStatus::Failed,
+            ], true)) {
+                throw new WorkflowConflict('Only a running, paused, or failed workflow can be moved.');
+            }
+
+            $destination = WorkflowStage::query()->lockForUpdate()->find($destinationStageId);
+            if (! $destination || $destination->workflow_definition_id !== $lockedRun->workflow_definition_id) {
+                throw new WorkflowConflict('The selected stage does not belong to this workflow definition.');
+            }
+            if ($destination->type === StageType::Terminal) {
+                throw new WorkflowConflict('Move to Human Review and use its approval action to complete the workflow.');
+            }
+            if ($destination->type === StageType::Agent) {
+                $this->assertRunAmpAuthorized($lockedRun, $actor);
+                $this->assertManualAgentDestinationReady($lockedRun, $destination);
+            }
+
+            if ($lockedRun->status === WorkflowStatus::Running) {
+                $this->assertCurrentActiveAttempt($lockedRun, $attempt);
+                $this->stopAttempt(
+                    $attempt,
+                    now(),
+                    'stage_overridden',
+                    'The current attempt was stopped by a manual stage override.',
+                );
+            } else {
+                $this->assertLatestClosedAttempt($lockedRun, $attempt);
+            }
+
+            $now = now();
+            $nextAttemptNumber = ((int) StageRun::query()
+                ->where('workflow_run_id', $lockedRun->getKey())
+                ->max('attempt_number')) + 1;
+
+            $lockedRun->forceFill([
+                'status' => WorkflowStatus::Running,
+                'current_stage_id' => $destination->getKey(),
+                'completed_at' => null,
+                'cancelled_at' => null,
+                'failed_at' => null,
+            ])->save();
+
+            $nextAttempt = $this->createStageAttempt($lockedRun, $destination, $nextAttemptNumber, $now);
+            $metadata = [
+                'from_stage_id' => $attempt->workflow_stage_id,
+                'from_stage_key' => $attempt->stage->key,
+                'from_attempt_number' => $attempt->attempt_number,
+                'to_stage_id' => $destination->getKey(),
+                'to_stage_key' => $destination->key,
+                'to_attempt_number' => $nextAttempt->attempt_number,
+            ];
+            $this->recordEvent($lockedRun, $attempt, 'workflow.stage_overridden', $actor, $metadata);
+            $this->recordEvent($lockedRun, $nextAttempt, 'stage.started', $actor, [
+                'stage_key' => $destination->key,
+                'attempt_number' => $nextAttempt->attempt_number,
+                'source' => 'manual_override',
+                'from_stage_key' => $attempt->stage->key,
+                'from_attempt_number' => $attempt->attempt_number,
+            ]);
+            $this->queueAmpLaunch($lockedRun, $nextAttempt);
+
+            return $lockedRun->fresh(['currentStage', 'activeStageRun']);
+        }, 3);
+    }
+
     /**
      * The sole transition primitive. The run lock serializes competing completions,
      * while the expected attempt ID prevents a late callback completing a newer stage.
@@ -294,41 +432,31 @@ class WorkflowEngine
                 return $lockedRun->fresh(['currentStage', 'activeStageRun']);
             }
 
-            if ($lockedRun->status !== WorkflowStatus::Running) {
-                throw new WorkflowConflict('Only a running workflow can be cancelled.');
+            if (! in_array($lockedRun->status, [WorkflowStatus::Running, WorkflowStatus::Paused], true)) {
+                throw new WorkflowConflict('Only a running or paused workflow can be cancelled.');
             }
 
-            $attempt = StageRun::query()
-                ->where('workflow_run_id', $lockedRun->getKey())
-                ->where('active_slot', 1)
-                ->lockForUpdate()
-                ->first();
+            $attempt = $lockedRun->status === WorkflowStatus::Running
+                ? StageRun::query()
+                    ->with('stage')
+                    ->where('workflow_run_id', $lockedRun->getKey())
+                    ->where('active_slot', 1)
+                    ->lockForUpdate()
+                    ->first()
+                : StageRun::query()
+                    ->with('stage')
+                    ->where('workflow_run_id', $lockedRun->getKey())
+                    ->latest('attempt_number')
+                    ->lockForUpdate()
+                    ->first();
 
             if (! $attempt) {
-                throw new WorkflowConflict('The running workflow has no active stage attempt.');
+                throw new WorkflowConflict('The workflow has no stage attempt to cancel.');
             }
 
             $now = now();
-            $attempt->forceFill([
-                'status' => StageRunStatus::Cancelled,
-                'active_slot' => null,
-                'completed_at' => $now,
-            ])->save();
-            $launch = $attempt->ampLaunch()->lockForUpdate()->first();
-            if ($launch) {
-                $cancellationEventId = $attempt->amp_thread_id ? (string) Str::uuid() : null;
-                $launch->forceFill([
-                    'delivery_status' => AmpDeliveryStatus::Failed,
-                    'launch_status' => AmpLaunchStatus::Failed,
-                    'last_error_code' => 'workflow_cancelled',
-                    'last_error_message' => 'The workflow was cancelled.',
-                    'cancellation_event_id' => $cancellationEventId,
-                    'cancellation_status' => $cancellationEventId ? 'pending' : null,
-                    'finished_at' => $now,
-                ])->save();
-                if ($cancellationEventId) {
-                    DeliverAmpCancellation::dispatch($launch->getKey())->afterCommit();
-                }
+            if ($lockedRun->status === WorkflowStatus::Running) {
+                $this->stopAttempt($attempt, $now, 'workflow_cancelled', 'The workflow was cancelled.');
             }
             $lockedRun->forceFill([
                 'status' => WorkflowStatus::Cancelled,
@@ -1117,6 +1245,92 @@ class WorkflowEngine
             'launch_event_id' => $launch->event_id,
         ]);
         DeliverAmpLaunch::dispatch($launch->getKey())->afterCommit();
+    }
+
+    private function stopAttempt(
+        StageRun $attempt,
+        mixed $stoppedAt,
+        string $errorCode,
+        string $errorMessage,
+    ): void {
+        $attempt->forceFill([
+            'status' => StageRunStatus::Cancelled,
+            'active_slot' => null,
+            'completed_at' => $stoppedAt,
+        ])->save();
+
+        $launch = $attempt->ampLaunch()->lockForUpdate()->first();
+        if (! $launch) {
+            return;
+        }
+
+        $cancellationEventId = $attempt->amp_thread_id
+            ? ($launch->cancellation_event_id ?: (string) Str::uuid())
+            : null;
+        $launch->forceFill([
+            'delivery_status' => AmpDeliveryStatus::Failed,
+            'launch_status' => AmpLaunchStatus::Failed,
+            'last_error_code' => $errorCode,
+            'last_error_message' => $errorMessage,
+            'cancellation_event_id' => $cancellationEventId,
+            'cancellation_status' => $cancellationEventId ? 'pending' : null,
+            'finished_at' => $stoppedAt,
+        ])->save();
+        if ($cancellationEventId) {
+            DeliverAmpCancellation::dispatch($launch->getKey())->afterCommit();
+        }
+    }
+
+    private function assertAttemptBelongsToRun(WorkflowRun $run, StageRun $attempt): void
+    {
+        if ($attempt->workflow_run_id !== $run->getKey()) {
+            throw new WorkflowConflict('That stage attempt does not belong to this workflow.');
+        }
+    }
+
+    private function assertCurrentActiveAttempt(WorkflowRun $run, StageRun $attempt): void
+    {
+        if (
+            $attempt->active_slot !== 1
+            || $run->current_stage_id !== $attempt->workflow_stage_id
+        ) {
+            throw new WorkflowConflict('This stage attempt is stale. Refresh the workflow and try again.');
+        }
+    }
+
+    private function assertLatestClosedAttempt(WorkflowRun $run, StageRun $attempt): void
+    {
+        $latestAttemptId = (int) StageRun::query()
+            ->where('workflow_run_id', $run->getKey())
+            ->orderByDesc('attempt_number')
+            ->value('id');
+        $validStatus = $run->status === WorkflowStatus::Paused
+            ? $attempt->status === StageRunStatus::Cancelled
+            : $attempt->status === StageRunStatus::Failed;
+
+        if (
+            $latestAttemptId !== $attempt->getKey()
+            || $run->current_stage_id !== $attempt->workflow_stage_id
+            || ! $validStatus
+        ) {
+            throw new WorkflowConflict('This stage attempt is stale. Refresh the workflow and try again.');
+        }
+    }
+
+    private function assertManualAgentDestinationReady(WorkflowRun $run, WorkflowStage $destination): void
+    {
+        if ($this->agentMode($destination) !== 'real_qa') {
+            return;
+        }
+
+        $hasPullRequest = StageRun::query()
+            ->where('workflow_run_id', $run->getKey())
+            ->whereNotNull('github_pull_request_number')
+            ->whereNotNull('github_pull_request_url')
+            ->exists();
+        if (! $hasPullRequest) {
+            throw new WorkflowConflict('Independent QA requires an existing Development pull request.');
+        }
     }
 
     private function createStageAttempt(

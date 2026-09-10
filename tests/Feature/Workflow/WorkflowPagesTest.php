@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Workflow;
 
+use App\Domain\Workflow\StageRunStatus;
+use App\Domain\Workflow\WorkflowStatus;
 use App\Models\User;
 use App\Models\WorkflowDefinition;
 use App\Models\WorkflowRun;
@@ -212,6 +214,91 @@ class WorkflowPagesTest extends TestCase
 
         $this->actingAs($other)->get(route('workflows.show', $run))->assertNotFound();
         $this->actingAs($other)->post(route('workflows.cancel', $run))->assertNotFound();
+        $this->actingAs($other)->post(route('workflows.attempts.pause', [$run, $run->activeStageRun]))->assertNotFound();
+        $this->actingAs($other)->post(route('workflows.attempts.override-stage', [$run, $run->activeStageRun]), [
+            'target_stage_id' => $run->definition->stages()->where('key', 'human_review')->sole()->id,
+        ])->assertNotFound();
+    }
+
+    public function test_manual_controls_render_and_support_pause_resume_and_validation(): void
+    {
+        $run = $this->startRun();
+        $attempt = $run->activeStageRun;
+
+        $this->actingAs($this->user)
+            ->get(route('workflows.show', $run))
+            ->assertOk()
+            ->assertSee('Manual controls')
+            ->assertSee('Stop current agent')
+            ->assertSee('Stop &amp; move', false)
+            ->assertSee('Cancel entire workflow')
+            ->assertSee('Move to stage')
+            ->assertDontSee('Done · Terminal');
+
+        $this->actingAs($this->user)
+            ->post(route('workflows.attempts.override-stage', [$run, $attempt]))
+            ->assertSessionHasErrors('target_stage_id');
+
+        $this->actingAs($this->user)
+            ->post(route('workflows.attempts.pause', [$run, $attempt]))
+            ->assertSessionHas('status', 'Current attempt stopped. Choose a stage when you are ready to resume.');
+
+        $this->actingAs($this->user)
+            ->get(route('workflows.show', $run->fresh()))
+            ->assertOk()
+            ->assertSee('Workflow paused')
+            ->assertSee('Resume at stage')
+            ->assertDontSee('Stop current agent');
+
+        $review = $run->definition->stages()->where('key', 'human_review')->sole();
+        $this->actingAs($this->user)
+            ->post(route('workflows.attempts.override-stage', [$run, $attempt]), [
+                'target_stage_id' => $review->id,
+            ])
+            ->assertSessionHas('status', 'Workflow moved to Human Review with a new audited attempt.');
+
+        $this->actingAs($this->user)
+            ->get(route('workflows.show', $run->fresh()))
+            ->assertOk()
+            ->assertSee('Manual review entry.')
+            ->assertSee('No QA result is implied')
+            ->assertSee('Approve');
+    }
+
+    public function test_manual_controls_are_hidden_after_workflow_completion(): void
+    {
+        $run = $this->startRun();
+        $run = $this->engine->simulateAgentCompletion($run, $run->activeStageRun, 'success', $this->user);
+        $run = $this->engine->simulateAgentCompletion($run, $run->activeStageRun, 'pass', $this->user);
+        $run = $this->engine->completeHumanAction($run, $run->activeStageRun, 'approve', $this->user);
+
+        $this->actingAs($this->user)
+            ->get(route('workflows.show', $run))
+            ->assertOk()
+            ->assertDontSee('Manual controls')
+            ->assertDontSee('Cancel entire workflow');
+    }
+
+    public function test_failed_workflow_renders_recovery_controls(): void
+    {
+        $run = $this->startRun();
+        $run->activeStageRun->update([
+            'status' => StageRunStatus::Failed,
+            'active_slot' => null,
+            'completed_at' => now(),
+        ]);
+        $run->update([
+            'status' => WorkflowStatus::Failed,
+            'failed_at' => now(),
+        ]);
+
+        $this->actingAs($this->user)
+            ->get(route('workflows.show', $run))
+            ->assertOk()
+            ->assertSee('Workflow failed')
+            ->assertSee('Manual controls')
+            ->assertSee('Resume at stage')
+            ->assertDontSee('Cancel entire workflow');
     }
 
     private function startRun(): WorkflowRun

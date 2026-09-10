@@ -5,6 +5,7 @@ namespace Tests\Feature\Workflow;
 use App\Domain\Workflow\Exceptions\WorkflowConflict;
 use App\Domain\Workflow\StageRunStatus;
 use App\Domain\Workflow\WorkflowStatus;
+use App\Jobs\DeliverAmpCancellation;
 use App\Models\StageRun;
 use App\Models\User;
 use App\Models\WorkflowDefinition;
@@ -13,6 +14,7 @@ use App\Services\WorkflowEngine;
 use Database\Seeders\DevelopmentWorkflowSeeder;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use LogicException;
 use Tests\TestCase;
 
@@ -213,6 +215,233 @@ class WorkflowEngineTest extends TestCase
         $this->expectException(WorkflowConflict::class);
         $this->expectExceptionMessage('Cancelled workflows');
         $this->engine->simulateAgentCompletion($run, $attempt, 'success', $this->user);
+    }
+
+    public function test_accidental_review_change_request_can_be_stopped_moved_back_and_approved(): void
+    {
+        $run = $this->simulate($this->startRun(), 'success');
+        $run = $this->simulate($run, 'pass');
+        $run = $this->engine->completeHumanAction(
+            $run,
+            $run->activeStageRun,
+            'request_changes',
+            $this->user,
+        );
+        $unnecessaryDevelopment = $run->activeStageRun;
+
+        $run = $this->engine->pause($run, $unnecessaryDevelopment, $this->user);
+
+        $this->assertSame(WorkflowStatus::Paused, $run->status);
+        $this->assertSame(StageRunStatus::Cancelled, $unnecessaryDevelopment->fresh()->status);
+        $this->assertNull($run->activeStageRun);
+
+        $humanReview = $run->definition->stages()->where('key', 'human_review')->sole();
+        $run = $this->engine->overrideStage(
+            $run,
+            $unnecessaryDevelopment,
+            $humanReview->id,
+            $this->user,
+        );
+
+        $this->assertSame(WorkflowStatus::Running, $run->status);
+        $this->assertSame('human_review', $run->currentStage->key);
+        $this->assertSame(5, $run->activeStageRun->attempt_number);
+        $this->assertSame(StageRunStatus::Waiting, $run->activeStageRun->status);
+        $this->assertSame(
+            [1, 2, 3, 4, 5],
+            $run->stageRuns()->pluck('attempt_number')->all(),
+        );
+
+        $override = $run->events()->where('type', 'workflow.stage_overridden')->sole();
+        $this->assertSame('development', $override->metadata['from_stage_key']);
+        $this->assertSame('human_review', $override->metadata['to_stage_key']);
+        $this->assertSame('manual_override', $run->events()->where('stage_run_id', $run->activeStageRun->id)->where('type', 'stage.started')->sole()->metadata['source']);
+
+        $run = $this->engine->completeHumanAction($run, $run->activeStageRun, 'approve', $this->user);
+        $this->assertSame(WorkflowStatus::Completed, $run->status);
+        $this->assertSame('done', $run->currentStage->key);
+        $this->assertSame(6, $run->stageRuns()->max('attempt_number'));
+    }
+
+    public function test_pause_and_manual_move_are_idempotent_and_allocate_one_new_attempt(): void
+    {
+        $run = $this->startRun();
+        $attempt = $run->activeStageRun;
+
+        $firstPause = $this->engine->pause($run, $attempt, $this->user);
+        $secondPause = $this->engine->pause($run, $attempt, $this->user);
+
+        $this->assertSame(WorkflowStatus::Paused, $firstPause->status);
+        $this->assertSame(WorkflowStatus::Paused, $secondPause->status);
+        $this->assertSame(1, $run->events()->where('type', 'workflow.paused')->count());
+
+        $review = $run->definition->stages()->where('key', 'human_review')->sole();
+        $firstMove = $this->engine->overrideStage($run, $attempt, $review->id, $this->user);
+        $secondMove = $this->engine->overrideStage($run, $attempt, $review->id, $this->user);
+
+        $this->assertSame($firstMove->current_stage_id, $secondMove->current_stage_id);
+        $this->assertSame(2, $run->stageRuns()->count());
+        $this->assertSame(1, $run->events()->where('type', 'workflow.stage_overridden')->count());
+
+        $qa = $run->definition->stages()->where('key', 'qa')->sole();
+        $this->expectException(WorkflowConflict::class);
+        $this->expectExceptionMessage('different stage');
+        $this->engine->overrideStage($run, $attempt, $qa->id, $this->user);
+    }
+
+    public function test_late_completion_of_a_paused_attempt_is_rejected(): void
+    {
+        $run = $this->startRun();
+        $attempt = $run->activeStageRun;
+        $this->engine->pause($run, $attempt, $this->user);
+
+        $this->expectException(WorkflowConflict::class);
+        $this->expectExceptionMessage('no longer running');
+        $this->engine->simulateAgentCompletion($run, $attempt, 'success', $this->user);
+    }
+
+    public function test_human_attempt_cannot_use_agent_pause_control(): void
+    {
+        $run = $this->simulate($this->startRun(), 'success');
+        $run = $this->simulate($run, 'pass');
+
+        $this->expectException(WorkflowConflict::class);
+        $this->expectExceptionMessage('active agent attempt');
+        $this->engine->pause($run, $run->activeStageRun, $this->user);
+    }
+
+    public function test_failed_workflow_can_resume_at_a_new_stage_with_monotonic_numbering(): void
+    {
+        $run = $this->startRun();
+        $attempt = $run->activeStageRun;
+        $attempt->update([
+            'status' => StageRunStatus::Failed,
+            'active_slot' => null,
+            'completed_at' => now(),
+        ]);
+        $run->update(['status' => WorkflowStatus::Failed, 'failed_at' => now()]);
+        $qa = $run->definition->stages()->where('key', 'qa')->sole();
+
+        $run = $this->engine->overrideStage($run, $attempt, $qa->id, $this->user);
+
+        $this->assertSame(WorkflowStatus::Running, $run->status);
+        $this->assertNull($run->failed_at);
+        $this->assertSame('qa', $run->currentStage->key);
+        $this->assertSame(2, $run->activeStageRun->attempt_number);
+    }
+
+    public function test_manual_move_rejects_terminal_cross_definition_and_stale_attempts(): void
+    {
+        $run = $this->startRun();
+        $attempt = $run->activeStageRun;
+        $done = $run->definition->stages()->where('key', 'done')->sole();
+
+        try {
+            $this->engine->overrideStage($run, $attempt, $done->id, $this->user);
+            $this->fail('Direct terminal moves must be rejected.');
+        } catch (WorkflowConflict $exception) {
+            $this->assertStringContainsString('Human Review', $exception->getMessage());
+        }
+
+        $foreignStage = WorkflowDefinition::query()->where('version', '>', 1)->firstOrFail()->stages()->firstOrFail();
+        try {
+            $this->engine->overrideStage($run, $attempt, $foreignStage->id, $this->user);
+            $this->fail('Cross-definition moves must be rejected.');
+        } catch (WorkflowConflict $exception) {
+            $this->assertStringContainsString('does not belong', $exception->getMessage());
+        }
+
+        $run = $this->simulate($run, 'success');
+        $this->expectException(WorkflowConflict::class);
+        $this->expectExceptionMessage('stale');
+        $this->engine->overrideStage(
+            $run,
+            $attempt,
+            $run->definition->stages()->where('key', 'human_review')->sole()->id,
+            $this->user,
+        );
+    }
+
+    public function test_agent_stage_manual_move_rechecks_account_and_bound_connection_authority(): void
+    {
+        $run = $this->startRun();
+        $attempt = $run->activeStageRun;
+        $this->engine->pause($run, $attempt, $this->user);
+        config(['services.amp.enabled' => true]);
+        Queue::fake();
+        $qa = $run->definition->stages()->where('key', 'qa')->sole();
+
+        try {
+            $this->engine->overrideStage($run, $attempt, $qa->id, $this->user);
+            $this->fail('An account without immutable launch permission must be rejected.');
+        } catch (WorkflowConflict $exception) {
+            $this->assertStringContainsString('not authorized', $exception->getMessage());
+        }
+
+        $this->user->update(['can_trigger_amp' => true]);
+        $this->expectException(WorkflowConflict::class);
+        $this->expectExceptionMessage('verified project connection');
+        $this->engine->overrideStage($run, $attempt, $qa->id, $this->user);
+    }
+
+    public function test_pausing_a_bound_agent_queues_exactly_one_thread_cancellation(): void
+    {
+        config(['services.amp.enabled' => true]);
+        $this->user->update(['can_trigger_amp' => true]);
+        Queue::fake();
+        $run = $this->startRun();
+        $attempt = $run->activeStageRun;
+        $attempt->update(['amp_thread_id' => 'T-00000000-0000-0000-0000-000000000099']);
+
+        $this->engine->pause($run, $attempt, $this->user);
+        $this->engine->pause($run, $attempt, $this->user);
+
+        Queue::assertPushed(DeliverAmpCancellation::class, 1);
+        $this->assertSame('pending', $attempt->ampLaunch->fresh()->cancellation_status);
+        $this->assertNotNull($attempt->ampLaunch->fresh()->cancellation_event_id);
+    }
+
+    public function test_manual_move_to_real_qa_requires_an_existing_bound_pull_request(): void
+    {
+        $definition = WorkflowDefinition::query()->where('version', 3)->sole();
+        $run = $this->engine->start(
+            $this->user,
+            $definition,
+            $this->workflowProject($this->user, 'acme/widgets'),
+            42,
+            'https://github.com/acme/widgets/issues/42',
+        );
+        $attempt = $run->activeStageRun;
+        $this->engine->pause($run, $attempt, $this->user);
+        $qa = $definition->stages()->where('key', 'qa')->sole();
+
+        $this->expectException(WorkflowConflict::class);
+        $this->expectExceptionMessage('existing Development pull request');
+        $this->engine->overrideStage($run, $attempt, $qa->id, $this->user);
+    }
+
+    public function test_completed_and_cancelled_workflows_cannot_be_manually_moved(): void
+    {
+        $cancelled = $this->startRun();
+        $cancelledAttempt = $cancelled->activeStageRun;
+        $this->engine->cancel($cancelled, $this->user);
+        $review = $cancelled->definition->stages()->where('key', 'human_review')->sole();
+
+        try {
+            $this->engine->overrideStage($cancelled, $cancelledAttempt, $review->id, $this->user);
+            $this->fail('Cancelled workflows must remain final.');
+        } catch (WorkflowConflict $exception) {
+            $this->assertStringContainsString('running, paused, or failed', $exception->getMessage());
+        }
+
+        $completed = $this->simulate($this->startRun(), 'success');
+        $completed = $this->simulate($completed, 'pass');
+        $reviewAttempt = $completed->activeStageRun;
+        $completed = $this->engine->completeHumanAction($completed, $reviewAttempt, 'approve', $this->user);
+
+        $this->expectException(WorkflowConflict::class);
+        $this->expectExceptionMessage('running, paused, or failed');
+        $this->engine->overrideStage($completed, $reviewAttempt, $review->id, $this->user);
     }
 
     public function test_human_action_requires_a_human_stage_but_not_feedback_for_changes(): void
