@@ -103,7 +103,7 @@ class MergeWorkflowTest extends TestCase
             ->assertSee('Policy-bound merge')
             ->assertSee('QA-approved head')
             ->assertSee('Material conflict review cycle: 0/1')
-            ->assertSee('merge queue');
+            ->assertSee('Open PR #17');
     }
 
     public function test_verified_merge_completes_once_and_rejects_missing_or_conflicting_evidence(): void

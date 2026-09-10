@@ -137,7 +137,7 @@ class AmpIntegrationTest extends TestCase
             ->get(route('workflows.show', $launch->stageRun->workflowRun))
             ->assertOk()
             ->assertSee('HTTP 202 does not mean an Orb was launched')
-            ->assertSee('no agent thread or Orb is running')
+            ->assertSee('No agent is running yet')
             ->assertSee('waiting for controller')
             ->assertSee('Stage Activated');
     }

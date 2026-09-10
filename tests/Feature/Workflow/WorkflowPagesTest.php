@@ -56,9 +56,15 @@ class WorkflowPagesTest extends TestCase
             ->assertSee('acme/widgets')
             ->assertSee('#18')
             ->assertSee('Development')
-            ->assertSee('Simulation only.')
+            ->assertSee('Workflow map')
+            ->assertSee('States and possible transitions')
+            ->assertSee('data-workflow-state-map', false)
             ->assertSee('Success')
-            ->assertDontSee('Request changes');
+            ->assertSee('QA')
+            ->assertSee('Simulation only.')
+            ->assertDontSee('Request changes')
+            ->assertDontSee('min-w-[42rem]', false)
+            ->assertDontSee('overflow-x-auto', false);
 
         $this->assertDatabaseMissing('workflow_runs', ['github_issue_url' => 'requirements text']);
     }
@@ -229,6 +235,10 @@ class WorkflowPagesTest extends TestCase
             ->get(route('workflows.show', $run))
             ->assertOk()
             ->assertSee('Manual controls')
+            ->assertSee('Recovery controls')
+            ->assertSee('data-recovery-controls', false)
+            ->assertSee('History &amp; audit', false)
+            ->assertSee('data-workflow-history', false)
             ->assertSee('Stop current agent')
             ->assertSee('Stop &amp; move', false)
             ->assertSee('Cancel entire workflow')

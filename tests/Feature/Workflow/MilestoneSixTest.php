@@ -298,15 +298,13 @@ class MilestoneSixTest extends TestCase
         $this->actingAs($this->user)->get(route('workflows.show', $run))
             ->assertOk()
             ->assertSee('Real Development')
-            ->assertSee('normal Amp tools')
-            ->assertSee('never provisions or copies GitHub credentials');
+            ->assertSee('A fresh Amp agent is implementing the GitHub issue.');
 
         $run = $this->completeDevelopmentSuccess();
         $this->actingAs($this->user)->get(route('workflows.show', $run))
             ->assertOk()
             ->assertSee('QA Integration Proof — not validation')
             ->assertSee('Integration proof')
-            ->assertSee('not code validation or approval')
             ->assertSee('https://github.com/acme/widgets/pull/17', false)
             ->assertSee('PR #17');
     }

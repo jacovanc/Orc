@@ -248,8 +248,8 @@ class MilestoneSevenTest extends TestCase
             ->assertOk()
             ->assertSee('Independent QA')
             ->assertSee('Substantive QA')
-            ->assertSee('independently inspecting and testing')
-            ->assertSee('Inspect bound PR #17')
+            ->assertSee('A fresh independent agent is inspecting and testing the bound pull request.')
+            ->assertSee('Open PR #17')
             ->assertDontSee('Integration proof');
 
         $qaLaunch = $runningQa->activeStageRun->ampLaunch;
@@ -272,6 +272,10 @@ class MilestoneSevenTest extends TestCase
             ->assertOk()
             ->assertSee('QA Blocked Review')
             ->assertSee('Operator intervention required')
+            ->assertSee('Review on GitHub')
+            ->assertSee('Open pull request #17')
+            ->assertSee('https://github.com/acme/widgets/pull/17', false)
+            ->assertSee('Open latest agent report')
             ->assertSee('Retry Independent QA');
 
         $passing = $this->completeDevelopmentSuccess($this->startRun(), 20, 720);
@@ -283,6 +287,9 @@ class MilestoneSevenTest extends TestCase
         $this->actingAs($this->user)->get(route('workflows.show', $passing->fresh()))
             ->assertOk()
             ->assertSee('Substantive QA passed')
+            ->assertSee('Review on GitHub')
+            ->assertSee('Open pull request #17')
+            ->assertSee('data-review-evidence', false)
             ->assertSee('separate human release decision')
             ->assertDontSee('QA was an integration proof only');
     }
