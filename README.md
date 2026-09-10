@@ -18,6 +18,7 @@ Before allowing an administrator to start Amp-backed workflows, complete the
 - A trusted project-local Amp controller plus a secretless global User Plugin worker. Agents retain normal tools and gain stage-bound workflow tools in one fresh private thread and Orb per attempt.
 - Independent QA bound to the exact Development pull request, including fresh issue/PR/review/CI reads, substantive PR reports, fail-to-remediation loops, and a human gate for blocked verdicts.
 - A fresh Merge agent after human approval, with exact reviewed-head and native GitHub merge evidence, one material-conflict QA/Human review cycle, and an explicit blocked gate.
+- Optional deduplicated queued email to the workflow owner whenever a run enters Human Review or another human-controlled blocked stage.
 - Explicit agent simulation controls when the integration is disabled, so orchestration can still be exercised without Amp.
 - Laravel Breeze authentication and owner-scoped workflow access.
 - Personal Projects with a canonical GitHub repository, explicit Amp project identity, immutable versioned controller connections, per-project run/start/settings pages, and an all-project run overview.
@@ -43,7 +44,7 @@ The integration is disabled by default. It requires a database queue worker and 
 3. The agent verifies Orc's immutable public worker artifact and publishes it—without touching unrelated plugins—to your Personal Plugins repository. It uses `reload_plugins` itself where supported and asks you to reload only as fallback; the worker is then available to this and future fresh Orbs.
 4. The resulting `orc_setup_project` tool binds the actual `AMP_PROJECT_ID` from that selected project, installs the SHA-256-pinned project controller, exchanges directional secrets and the webhook over HTTPS, and queues harmless verification. It neither overwrites unrelated plugins nor handles GitHub credentials. The same self-reload-first rule applies to the controller reload. No webhook URL or signing secret is copied by hand.
 5. Refresh Orc for the fresh-Orb placement and native `gh` read result. Repeat independently for every Project/Amp project.
-6. Set `QUEUE_CONNECTION=database`, run a worker for `amp-launches`, and enable `AMP_INTEGRATION_ENABLED` only after application setup. No global GitHub token, repository allowlist, or mutable-email authority is used.
+6. Set `QUEUE_CONNECTION=database`, run a worker for `amp-launches,workflow-notifications`, and enable `AMP_INTEGRATION_ENABLED` only after application setup. No global GitHub token, repository allowlist, or mutable-email authority is used.
 
 Never commit or log directional secrets, per-launch capabilities, or webhook URLs. Orc does not own a GitHub token. Exact setup steps are in [Project setup protocol v1](docs/project-setup-v1.md); configuration, rotation, failure handling, and trust boundaries are in [docs/amp-integration.md](docs/amp-integration.md).
 
@@ -89,7 +90,7 @@ Laravel Cloud needs a database because workflow state and authentication are per
 - build command: `composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader && npm ci --audit false && npm run build`
 - deploy command: `php artisan migrate --force && php artisan db:seed --force`
 
-The seed is idempotent and preserves immutable workflows v1–v3 while creating Merge workflow v4. Production also needs a supervised `php artisan queue:work database --queue=amp-launches` process. Do not put Amp credentials into source control; GitHub access remains native user-configured Orb state, never Orc configuration.
+The seed is idempotent and preserves immutable workflows v1–v3 while creating Merge workflow v4. Production also needs a supervised `php artisan queue:work database --queue=amp-launches,workflow-notifications` process. Mailgun activation is documented in [Workflow attention email](docs/email-notifications.md). Do not put Amp credentials into source control; GitHub access remains native user-configured Orb state, never Orc configuration.
 
 Deployment status and exact verification evidence are recorded in [IMPLEMENTATION.md](IMPLEMENTATION.md).
 

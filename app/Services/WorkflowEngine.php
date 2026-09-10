@@ -30,6 +30,8 @@ use Illuminate\Support\Str;
 
 class WorkflowEngine
 {
+    public function __construct(private readonly WorkflowAttentionNotifier $attentionNotifier) {}
+
     public function start(
         User $actor,
         WorkflowDefinition $definition,
@@ -1480,7 +1482,7 @@ class WorkflowEngine
     ): StageRun {
         $terminal = $stage->type === StageType::Terminal;
 
-        return StageRun::query()->create([
+        $attempt = StageRun::query()->create([
             'workflow_run_id' => $run->getKey(),
             'workflow_stage_id' => $stage->getKey(),
             'attempt_number' => $attemptNumber,
@@ -1493,6 +1495,10 @@ class WorkflowEngine
             'started_at' => $startedAt,
             'completed_at' => $terminal ? $startedAt : null,
         ]);
+
+        $this->attentionNotifier->schedule($run, $attempt, $stage);
+
+        return $attempt;
     }
 
     private function recordEvent(

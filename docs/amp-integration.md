@@ -65,10 +65,12 @@ Global webhook/secrets and email/repository allowlists are legacy migration inpu
 Run a supervised queue worker:
 
 ```bash
-php artisan queue:work database --queue=amp-launches --tries=4 --backoff=5 --timeout=30
+php artisan queue:work database --queue=amp-launches,workflow-notifications --tries=4 --backoff=5 --timeout=30
 ```
 
 Enable integration last. For directional-secret rotation, disable new launches, finish or cancel active attempts, replace both ends of one direction together, reload/restart, verify, and re-enable.
+
+The second queue is used only by optional owner-attention email and does not contain Amp or GitHub credentials. Configure Mailgun and enable it separately using [Workflow attention email](email-notifications.md).
 
 ## Authentication and stage capability
 

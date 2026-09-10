@@ -47,6 +47,10 @@ An immutable numbered attempt at a stage within a workflow run. An attempt has s
 
 An append-only audit record of orchestration facts. Events contain structured identifiers and state-change metadata only, not requirement text, agent prompts, reports, or review feedback. There are no update or delete paths in the application.
 
+### WorkflowAttentionDelivery
+
+A deduplicated operational outbox record for notifying the workflow owner that a human StageRun needs attention. The unique stage-attempt/channel binding is created inside the same transaction that enters the stage; provider delivery occurs after commit on a bounded-retry queue. The job skips attempts that are no longer active and waiting. This record contains delivery state and sanitized failure text, never Mailgun credentials or substantive workflow context.
+
 ### Manual run control
 
 An owner may pause the current agent attempt or manually move a running, paused, or failed run to another non-terminal stage in the same immutable definition. This is an audited run-level override, not an edit to the definition or history: the current attempt is closed, any bound Amp thread receives the existing signed cancellation command, and a new monotonically numbered attempt is created at the selected stage. Completed and cancelled runs remain final; workflow v4 reaches Done only through verified Merge completion after the human approval transition.
@@ -78,6 +82,7 @@ Workflow v2 and v3 are separately frozen definitions documented in [Milestone 6]
 9. Human actions are accepted only for the current active human attempt and only when permitted by the definition. In v1–v3 approval completes directly; in v4 it starts one fresh Merge attempt. `request_changes` starts one fresh Development attempt whose agent rereads the bound pull request, reviews, inline comments, and discussion from GitHub.
 10. Agent simulation is available only when Amp integration is disabled and is visibly marked as simulation in both the UI and event stream.
 11. Manual pause and stage movement identify the expected attempt, preserve monotonic attempt numbering, reject cross-definition or terminal destinations, and cancel a bound agent thread before queuing any replacement agent attempt.
+12. When email is enabled, every newly created human attempt schedules at most one owner notification under a database uniqueness constraint. Disabled notifications create no backlog, and delayed jobs do not email for stale attempts.
 
 ## Service and HTTP shape
 
