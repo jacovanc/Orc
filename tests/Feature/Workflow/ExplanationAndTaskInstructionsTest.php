@@ -78,6 +78,11 @@ class ExplanationAndTaskInstructionsTest extends TestCase
                 $run->stageInstructions->firstWhere('agent_mode', 'real_explanation')->body,
                 $payload['task_instruction_body'],
             );
+            $this->assertSame(2, $payload['task_instruction_version']);
+            $this->assertStringContainsString("reply directly in that comment's existing review thread", $payload['task_instruction_body']);
+            $this->assertStringContainsString('/comments/{comment_id}/replies', $payload['task_instruction_body']);
+            $this->assertStringContainsString('Do not combine inline answers', $payload['task_instruction_body']);
+            $this->assertStringContainsString('links to the individual answers without repeating their text', $payload['task_instruction_body']);
 
             $thread = 'T-'.str_pad((string) $explanation->id, 36, '0', STR_PAD_LEFT);
             $this->ampCallback($explanation->ampLaunch, 'launch.claim');
@@ -206,6 +211,26 @@ class ExplanationAndTaskInstructionsTest extends TestCase
                 ->assertSessionHasErrors();
         }
         $this->assertDatabaseCount('project_stage_instruction_versions', 0);
+    }
+
+    public function test_first_explanation_override_follows_the_versioned_default(): void
+    {
+        $current = app(StageTaskInstructionService::class)->current($this->project, 'real_explanation');
+        $this->assertSame(2, $current['version']);
+        $this->assertSame('default', $current['source']);
+        $this->actingAs($this->owner)->get(route('projects.settings', $this->project))
+            ->assertOk()
+            ->assertSee('Task body v2')
+            ->assertSee('reply directly in that comment&#039;s existing review thread', false);
+
+        $this->actingAs($this->owner)->put(route('projects.stage-instructions.update', $this->project), [
+            'agent_mode' => 'real_explanation',
+            'body' => 'Use one focused inline reply per review question.',
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $configured = app(StageTaskInstructionService::class)->current($this->project, 'real_explanation');
+        $this->assertSame(3, $configured['version']);
+        $this->assertSame('project', $configured['source']);
     }
 
     private function startRun(): WorkflowRun

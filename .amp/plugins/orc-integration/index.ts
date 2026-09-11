@@ -427,7 +427,8 @@ async function acknowledgeAndPrompt(
 					task,
 					`Explanation for ${context.github_repository}#${context.github_issue_number} on exact pull request ${context.prior_pull_request_url}.`,
 					`Human Review most recently began at ${context.human_review_entered_at ?? 'an unavailable legacy timestamp'}; use this only as a hint when identifying unanswered questions.`,
-					`Post the answer or clarification-needed report on the exact PR using native gh. Its comment must contain exactly one matching marker: <!-- orc-report:${context.report_nonce}:completed --> or <!-- orc-report:${context.report_nonce}:blocked -->.`,
+					'Reply to every answerable inline review question directly in that comment’s existing GitHub review thread, preserving its file and line context. Do not collect those answers into the general report comment.',
+					`After the direct replies, post only a short completion report—or a clarification-needed report—on the exact PR using native gh. It may link to the individual answers but must not repeat them. Its comment must contain exactly one matching marker: <!-- orc-report:${context.report_nonce}:completed --> or <!-- orc-report:${context.report_nonce}:blocked -->.`,
 					'Use completed when clear questions were answered and blocked when no clear question can be identified or a trustworthy answer is impossible. Both return to Human Review; neither approves, merges, or starts Development.',
 					'Call workflow_complete with the same outcome and report comment URL/ID.',
 					capability,
@@ -884,7 +885,7 @@ function correctiveInstruction(context: LaunchPayload) {
 		: context.agent_mode === 'real_qa'
 			? `Safety check: you ended without completing independent QA. Post an honest substantive pass, fail, or blocked report on the bound pull request using native gh, then call workflow_complete with its evidence and the same outcome. Do not change or push implementation. ${directTool}`
 		: context.agent_mode === 'real_explanation'
-				? `Safety check: you ended without completing the bound Explanation stage. Answer clear Human Review questions or post an honest clarification-needed report on the exact pull request, then call workflow_complete with completed or blocked. Do not change code or workflow decisions. ${directTool}`
+				? `Safety check: you ended without completing the bound Explanation stage. Reply to each clear inline review question in its existing GitHub thread, then post only a brief marker-bound completion report linking those replies—or an honest clarification-needed report—and call workflow_complete with completed or blocked. Do not combine answers in the report or change code or workflow decisions. ${directTool}`
 				: context.agent_mode === 'real_merge'
 					? `Safety check: you ended without completing the bound Merge stage. Recheck live GitHub state, post the required substantive PR report, and call workflow_complete with an allowed merged, requires_review, or blocked outcome. Never bypass repository policy or claim an unverified merge. ${directTool}`
 					: `Safety check: you ended without completing the bound proof stage. Post the labelled integration-test report with native gh if needed, then call workflow_complete with its evidence. Do not perform any other work. ${directTool}`

@@ -15,7 +15,7 @@ class StageTaskInstructionService
 {
     public const MAX_BODY_LENGTH = 12000;
 
-    /** @return array<string, array{label: string, body: string, boundary: string}> */
+    /** @return array<string, array{label: string, body: string, boundary: string, version?: int}> */
     public function modes(): array
     {
         return [
@@ -35,8 +35,9 @@ TEXT,
             ],
             'real_explanation' => [
                 'label' => 'Explanation',
+                'version' => 2,
                 'body' => <<<'TEXT'
-Read the issue, exact pull request and code, reviews, inline comments, recent human discussion, prior reports, and checks afresh. Identify the unanswered human questions; the latest Human Review entry time is only a hint, not a hard cutoff. Answer the questions concretely on the exact pull request with relevant code and test citations. If no clear question exists, publish an honest clarification-needed report instead of inventing one.
+Read the issue, exact pull request and code, reviews, inline comments, recent human discussion, prior reports, and checks afresh. Identify the unanswered human questions; the latest Human Review entry time is only a hint, not a hard cutoff. Treat each unanswered inline pull-request review comment as its own conversation: reply directly in that comment's existing review thread with a concrete answer and relevant code or test citations so its file and line context remain visible. Use GitHub's native pull-review-comment reply endpoint (`POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies`) rather than a general pull-request comment for each inline answer. Do not combine inline answers into one general pull-request comment. For a question that exists only in a top-level review body or pull-request conversation and has no inline reply target, post one focused response that links to that source question. After answering, publish only a short completion report on the exact pull request that links to the individual answers without repeating their text. If no clear question exists, publish an honest clarification-needed report instead of inventing one.
 TEXT,
                 'boundary' => 'Read-only explanation. Must not edit, commit, push, merge, approve, request changes, or start Development.',
             ],
@@ -67,7 +68,7 @@ TEXT,
             'agent_mode' => $mode,
             'label' => $definition['label'],
             'body' => $configured?->body ?? $definition['body'],
-            'version' => $configured?->version ?? 1,
+            'version' => $configured?->version ?? ($definition['version'] ?? 1),
             'source' => $configured ? 'project' : 'default',
             'boundary' => $definition['boundary'],
         ];
@@ -87,16 +88,18 @@ TEXT,
             if ($locked->user_id !== $actor->id || ! $actor->can_trigger_amp) {
                 throw new WorkflowConflict('You are not authorized to edit this project’s agent instructions.');
             }
-            $version = ((int) ProjectStageInstructionVersion::query()
+            $configuredVersion = (int) ProjectStageInstructionVersion::query()
                 ->where('project_id', $locked->id)
                 ->where('agent_mode', $mode)
-                ->max('version')) + 1;
+                ->max('version');
+            $defaultVersion = $this->modes()[$mode]['version'] ?? 1;
+            $version = max($configuredVersion, $defaultVersion) + 1;
 
             return ProjectStageInstructionVersion::query()->create([
                 'project_id' => $locked->id,
                 'created_by' => $actor->id,
                 'agent_mode' => $mode,
-                'version' => $version === 1 ? 2 : $version,
+                'version' => $version,
                 'body' => $body,
             ]);
         }, 3);

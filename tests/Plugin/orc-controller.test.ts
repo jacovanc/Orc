@@ -348,6 +348,46 @@ describe('Orc controller agent configuration', () => {
 		rmSync(harness.root, { recursive: true, force: true })
 	})
 
+	test('requires Explanation answers to preserve inline review-thread context', async () => {
+		const harness = await controllerHarness('explanation-inline-replies')
+		const explanationLaunch = launch({
+			agent_mode: 'real_explanation',
+			stage_key: 'explanation',
+			stage_name: 'Explanation',
+			allowed_outcomes: ['completed', 'blocked'],
+			prior_pull_request_number: 12,
+			prior_pull_request_url: 'https://github.com/acme/widgets/pull/12',
+			task_instruction_body: 'Answer each review question directly.',
+			task_instruction_version: 2,
+		})
+		let contextCalls = 0
+		globalThis.fetch = (async (_input, init) => {
+			const payload = JSON.parse(String(init?.body))
+			if (payload.type === 'launch.claim') return Response.json({
+				accepted: true,
+				launch: false,
+				is_active: true,
+				thread_id: 'T-00000000-0000-0000-0000-000000000041',
+			})
+			if (payload.type === 'launch.acknowledged') return Response.json({ accepted: true })
+			if (payload.action === 'context') return Response.json({
+				...explanationLaunch,
+				thread_id: 'T-00000000-0000-0000-0000-000000000041',
+				completed: false,
+				is_active: contextCalls++ === 0,
+			})
+			throw new Error(`Unexpected callback: ${JSON.stringify(payload)}`)
+		}) as typeof fetch
+
+		await harness.invoke(explanationLaunch)
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		expect(harness.promptBodies()[0]).toContain('directly in that comment’s existing GitHub review thread')
+		expect(harness.promptBodies()[0]).toContain('must not repeat them')
+		expect(harness.promptBodies()[0]).toContain('Answer each review question directly.')
+		rmSync(harness.root, { recursive: true, force: true })
+	})
+
 	test('rejects Explanation on protocol two and missing task snapshots on protocol three', async () => {
 		const protocolTwo = await controllerHarness('protocol-two-explanation', false, 2)
 		const protocolThree = await controllerHarness('protocol-three-missing-snapshot')
