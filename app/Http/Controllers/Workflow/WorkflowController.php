@@ -25,7 +25,7 @@ class WorkflowController extends Controller
     {
         $runs = WorkflowRun::query()
             ->whereBelongsTo($request->user())
-            ->with(['definition', 'currentStage', 'activeStageRun'])
+            ->with(['definition', 'currentStage', 'activeStageRun.stage'])
             ->latest()
             ->paginate(12);
 

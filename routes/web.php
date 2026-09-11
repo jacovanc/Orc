@@ -53,6 +53,18 @@ Route::get('/integrations/amp/plugins/orc-worker-v3.ts', function () {
     ]);
 })->name('integrations.amp.worker-plugin-v3');
 
+Route::get('/integrations/amp/plugins/orc-worker-v4.ts', function () {
+    $source = (string) file_get_contents(resource_path('amp/orc-worker-v4.ts'));
+
+    return response($source, 200, [
+        'Cache-Control' => 'public, max-age=31536000, immutable',
+        'Content-Type' => 'text/plain; charset=UTF-8',
+        'Content-Disposition' => 'inline; filename="orc-worker-v4.ts"',
+        'ETag' => '"'.hash('sha256', $source).'"',
+        'X-Content-Type-Options' => 'nosniff',
+    ]);
+})->name('integrations.amp.worker-plugin-v4');
+
 Route::get('/dashboard', function () {
     return to_route('workflows.index');
 })->middleware('auth')->name('dashboard');

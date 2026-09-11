@@ -342,6 +342,8 @@ describe('Orc controller agent configuration', () => {
 		expect(harness.promptBodies()[0]).toContain('TASK BODY v7')
 		expect(harness.promptBodies()[0]).toContain(customBody)
 		expect(harness.promptBodies()[0].match(/Inspect the widget renderer\./g)).toHaveLength(1)
+		expect(harness.promptBodies()[0]).toContain('workflow_complete is already a directly registered tool')
+		expect(harness.promptBodies()[0]).toContain('do not search for it through tool_search/code_exec')
 		expect(harness.promptBodies()[0]).toContain('Capability token:')
 		rmSync(harness.root, { recursive: true, force: true })
 	})

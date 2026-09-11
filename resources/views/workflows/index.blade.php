@@ -48,7 +48,7 @@
                     <p class="mt-1 text-sm text-zinc-400">{{ $run->started_at?->diffForHumans() }}</p>
                 </div>
                 <div class="flex items-center gap-4">
-                    <span class="status-pill status-{{ $run->status->value }}">{{ $run->status->value }}</span>
+                    <span class="status-pill status-{{ $run->displayStatusClass() }}">{{ $run->displayStatus() }}</span>
                     <span class="text-zinc-700 transition group-hover:translate-x-1 group-hover:text-zinc-300">→</span>
                 </div>
             </a>

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Domain\Workflow\StageType;
 use App\Domain\Workflow\WorkflowStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -80,5 +81,31 @@ class WorkflowRun extends Model
     public function stageInstructions(): HasMany
     {
         return $this->hasMany(WorkflowRunStageInstruction::class);
+    }
+
+    public function needsHumanAttention(): bool
+    {
+        if ($this->status !== WorkflowStatus::Running) {
+            return false;
+        }
+
+        $attempt = $this->relationLoaded('activeStageRun')
+            ? $this->activeStageRun
+            : $this->activeStageRun()->with('stage')->first();
+        if ($attempt && ! $attempt->relationLoaded('stage')) {
+            $attempt->load('stage');
+        }
+
+        return $attempt?->stage?->type === StageType::Human;
+    }
+
+    public function displayStatus(): string
+    {
+        return $this->needsHumanAttention() ? 'needs attention' : $this->status->value;
+    }
+
+    public function displayStatusClass(): string
+    {
+        return $this->needsHumanAttention() ? 'waiting' : $this->status->value;
     }
 }

@@ -246,6 +246,7 @@ class MilestoneSevenTest extends TestCase
         $runningQa->refresh()->load(['currentStage', 'activeStageRun.ampLaunch', 'stageRuns.ampLaunch']);
         $this->actingAs($this->user)->get(route('workflows.show', $runningQa))
             ->assertOk()
+            ->assertSee('status-running', false)
             ->assertSee('Independent QA')
             ->assertSee('Substantive QA')
             ->assertSee('A fresh independent agent is inspecting and testing the bound pull request.')
@@ -270,6 +271,9 @@ class MilestoneSevenTest extends TestCase
         $this->complete($blockedLaunch, $blockedThread, 'blocked', 'https://github.com/acme/widgets/pull/17#issuecomment-711');
         $this->actingAs($this->user)->get(route('workflows.show', $blocked->fresh()))
             ->assertOk()
+            ->assertSee('needs attention')
+            ->assertSee('status-waiting', false)
+            ->assertDontSee('status-running', false)
             ->assertSee('QA Blocked Review')
             ->assertSee('Operator intervention required')
             ->assertSee('Review on GitHub')

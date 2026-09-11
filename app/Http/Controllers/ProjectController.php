@@ -61,7 +61,7 @@ class ProjectController extends Controller
     {
         $this->assertOwner($request, $project);
         $runs = $project->workflowRuns()
-            ->with(['definition', 'currentStage', 'activeStageRun'])
+            ->with(['definition', 'currentStage', 'activeStageRun.stage'])
             ->latest()
             ->paginate(12);
         $project->load('currentConnection');

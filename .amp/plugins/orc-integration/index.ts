@@ -382,7 +382,8 @@ async function acknowledgeAndPrompt(
 	}
 
 	const capability = [
-		'Use this stage-scoped capability only as the capability_url and capability_token arguments to workflow_complete.',
+		'workflow_complete is already a directly registered tool in your tool list. Invoke that tool directly; do not search for it through tool_search/code_exec, reload plugins, import plugin source, or create a shell-script substitute.',
+		'Use this stage-scoped capability only as the capability_url and capability_token arguments to that direct workflow_complete call.',
 		`Capability URL: ${context.stage_capability_url}`,
 		`Capability token: ${context.stage_capability_token}`,
 		'Never print or publish the token. It is restricted to this attempt and cannot grant repository access.',
@@ -877,15 +878,16 @@ function errorMessage(error: unknown) {
 }
 
 function correctiveInstruction(context: LaunchPayload) {
+	const directTool = 'Invoke the directly registered workflow_complete tool now. Do not use tool_search, code_exec, shell, plugin reload, or a plugin-source workaround.'
 	return context.agent_mode === 'real_development'
-		? 'Safety check: you ended without completing the bound Development stage. Finish the authorized issue work or post a substantive blocked report with native gh, then call workflow_complete with the required evidence and success or blocked. Never merge the pull request.'
+		? `Safety check: you ended without completing the bound Development stage. Finish the authorized issue work or post a substantive blocked report with native gh, then call workflow_complete with the required evidence and success or blocked. Never merge the pull request. ${directTool}`
 		: context.agent_mode === 'real_qa'
-			? 'Safety check: you ended without completing independent QA. Post an honest substantive pass, fail, or blocked report on the bound pull request using native gh, then call workflow_complete with its evidence and the same outcome. Do not change or push implementation.'
+			? `Safety check: you ended without completing independent QA. Post an honest substantive pass, fail, or blocked report on the bound pull request using native gh, then call workflow_complete with its evidence and the same outcome. Do not change or push implementation. ${directTool}`
 		: context.agent_mode === 'real_explanation'
-				? 'Safety check: you ended without completing the bound Explanation stage. Answer clear Human Review questions or post an honest clarification-needed report on the exact pull request, then call workflow_complete with completed or blocked. Do not change code or workflow decisions.'
+				? `Safety check: you ended without completing the bound Explanation stage. Answer clear Human Review questions or post an honest clarification-needed report on the exact pull request, then call workflow_complete with completed or blocked. Do not change code or workflow decisions. ${directTool}`
 				: context.agent_mode === 'real_merge'
-					? 'Safety check: you ended without completing the bound Merge stage. Recheck live GitHub state, post the required substantive PR report, and call workflow_complete with an allowed merged, requires_review, or blocked outcome. Never bypass repository policy or claim an unverified merge.'
-					: 'Safety check: you ended without completing the bound proof stage. Post the labelled integration-test report with native gh if needed, then call workflow_complete with its evidence. Do not perform any other work.'
+					? `Safety check: you ended without completing the bound Merge stage. Recheck live GitHub state, post the required substantive PR report, and call workflow_complete with an allowed merged, requires_review, or blocked outcome. Never bypass repository policy or claim an unverified merge. ${directTool}`
+					: `Safety check: you ended without completing the bound proof stage. Post the labelled integration-test report with native gh if needed, then call workflow_complete with its evidence. Do not perform any other work. ${directTool}`
 }
 
 async function threadHasMarker(thread: PluginThread, marker: string) {

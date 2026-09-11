@@ -42,15 +42,15 @@ class ProjectSetupTest extends TestCase
             ->assertSeeText('GitHub access invariant');
     }
 
-    public function test_versioned_worker_is_a_public_immutable_three_tool_artifact(): void
+    public function test_current_worker_is_a_public_immutable_three_tool_artifact_while_v3_remains_available(): void
     {
-        $source = (string) file_get_contents(resource_path('amp/orc-worker-v3.ts'));
+        $source = (string) file_get_contents(resource_path('amp/orc-worker-v4.ts'));
         $this->assertSame(3, substr_count($source, 'amp.registerTool({'));
         $this->assertStringNotContainsString('GH_TOKEN', $source);
         $this->assertStringNotContainsString('GITHUB_TOKEN', $source);
         $this->assertStringNotContainsString('ORC_GITHUB_TOKEN', $source);
 
-        $this->get(route('integrations.amp.worker-plugin-v3'))
+        $this->get(route('integrations.amp.worker-plugin-v4'))
             ->assertOk()
             ->assertHeader('Content-Type', 'text/plain; charset=UTF-8')
             ->assertHeader('Cache-Control', 'immutable, max-age=31536000, public')
@@ -61,6 +61,10 @@ class ProjectSetupTest extends TestCase
             ->assertSee('workflow_complete', false)
             ->assertSee("'completed'", false)
             ->assertSee('real_explanation', false);
+
+        $this->get(route('integrations.amp.worker-plugin-v3'))
+            ->assertOk()
+            ->assertDontSee('directly registered tool; invoke it directly', false);
 
         $this->get(route('integrations.amp.worker-plugin-v2'))
             ->assertOk()
@@ -104,8 +108,8 @@ class ProjectSetupTest extends TestCase
             ->assertSee('Personal User Plugins repository')
             ->assertSee('reload_plugins')
             ->assertSee('Only if no supported reload tool is available')
-            ->assertSee(route('integrations.amp.worker-plugin-v3'), false)
-            ->assertSee(hash('sha256', (string) file_get_contents(resource_path('amp/orc-worker-v3.ts'))))
+            ->assertSee(route('integrations.amp.worker-plugin-v4'), false)
+            ->assertSee(hash('sha256', (string) file_get_contents(resource_path('amp/orc-worker-v4.ts'))))
             ->assertSee($setup->public_id)
             ->assertSee(route('docs.project-setup-v1'))
             ->assertDontSee('github.com/jacovanc/Orc/blob', false)

@@ -16,7 +16,7 @@
         @forelse ($runs as $run)
             <a href="{{ route('workflows.show', $run) }}" class="group mb-3 flex items-center justify-between gap-5 rounded-2xl border border-white/[0.07] bg-ink-900/70 p-5 transition hover:border-white/[0.14]">
                 <div><h2 class="font-semibold text-zinc-100">Issue #{{ $run->github_issue_number }}</h2><p class="mt-1 text-xs text-zinc-500">RUN-{{ str_pad($run->id, 4, '0', STR_PAD_LEFT) }} · {{ $run->definition->name }} v{{ $run->definition->version }} · {{ $run->currentStage?->name }}</p></div>
-                <span class="status-pill status-{{ $run->status->value }}">{{ $run->status->value }}</span>
+                <span class="status-pill status-{{ $run->displayStatusClass() }}">{{ $run->displayStatus() }}</span>
             </a>
         @empty
             <div class="panel py-20 text-center"><h2 class="font-semibold text-white">No runs in this project</h2><p class="mt-2 text-sm text-zinc-500">Connect and verify the Amp controller, then start from a GitHub issue.</p></div>

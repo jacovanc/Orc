@@ -54,7 +54,7 @@
     <div>
         <a href="{{ $run->project ? route('projects.show', $run->project) : route('workflows.index') }}" class="inline-flex items-center gap-2 text-sm text-zinc-600 transition hover:text-zinc-300"><span>←</span> {{ $run->project?->name ?? 'Workflows' }}</a>
         <div class="mt-6 flex flex-wrap items-center gap-3">
-            <span class="status-pill status-{{ $run->status->value }}">{{ $run->status->value }}</span>
+            <span class="status-pill status-{{ $run->displayStatusClass() }}">{{ $run->displayStatus() }}</span>
             <span class="font-mono text-xs text-zinc-700">RUN-{{ str_pad($run->id, 4, '0', STR_PAD_LEFT) }}</span>
         </div>
         <h1 class="mt-4 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">{{ $run->github_repository }} <span class="text-zinc-600">#{{ $run->github_issue_number }}</span></h1>
