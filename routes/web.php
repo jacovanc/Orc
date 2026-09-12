@@ -91,6 +91,8 @@ Route::middleware('auth')->group(function () {
         ->name('workflows.attempts.pause');
     Route::post('/workflows/{workflowRun}/attempts/{stageRun}/override-stage', [WorkflowController::class, 'overrideStage'])
         ->name('workflows.attempts.override-stage');
+    Route::post('/workflows/{workflowRun}/attempts/{stageRun}/complete-after-manual-merge', [WorkflowController::class, 'completeAfterManualMerge'])
+        ->name('workflows.attempts.complete-after-manual-merge');
     Route::post('/workflows/{workflowRun}/cancel', [WorkflowController::class, 'cancel'])
         ->name('workflows.cancel');
 

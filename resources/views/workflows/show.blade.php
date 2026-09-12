@@ -49,6 +49,11 @@
             ->where('outcome', 'requires_review')
             ->filter(fn ($attempt) => ($attempt->stage->config['agent_mode'] ?? null) === 'real_merge')
             ->count();
+        $supportsManualMergeCompletion = $controlAttempt?->stage?->type === \App\Domain\Workflow\StageType::Human
+            && $latestPublication?->github_pull_request_url
+            && $run->definition->stages->contains(fn ($stage) => $stage->key === 'merge' && $stage->type === \App\Domain\Workflow\StageType::Agent)
+            && $run->definition->stages->contains(fn ($stage) => $stage->key === 'done' && $stage->type === \App\Domain\Workflow\StageType::Terminal);
+        $manualCompletionEvent = $run->events->firstWhere('type', 'workflow.manually_completed');
     @endphp
 
     <div>
@@ -298,6 +303,13 @@
                                 </form>
                             @endif
                         @endforeach
+                        @if ($supportsManualMergeCompletion)
+                            <form class="mt-4 flex flex-col justify-between gap-4 rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.05] p-5 sm:flex-row sm:items-center" method="POST" action="{{ route('workflows.attempts.complete-after-manual-merge', [$run, $active]) }}" onsubmit="return confirm('Confirm that PR #{{ $latestPublication->github_pull_request_number }} was merged manually and mark this workflow Done? Orc will record this as your attestation, not an agent-verified merge.')">
+                                @csrf
+                                <div><p class="text-sm font-medium text-emerald-100">Already merged on GitHub?</p><p class="mt-1 text-xs leading-5 text-emerald-200/50">Close this human stage without another agent. Orc records your confirmation as an owner-attested audit event.</p></div>
+                                <button class="button-primary w-full whitespace-nowrap bg-emerald-500 hover:bg-emerald-400 sm:w-auto" type="submit">Mark done</button>
+                            </form>
+                        @endif
                     @endif
                 </div>
             </div>
@@ -308,7 +320,7 @@
             @php
                 $verifiedMerge = $run->stageRuns->whereNotNull('github_merge_commit_sha')->sortByDesc('attempt_number')->first();
             @endphp
-            <h2 class="mt-3 text-2xl font-semibold text-white">{{ $verifiedMerge ? 'Verified merged and marked Done' : 'Approved and marked Done' }}</h2>
+            <h2 class="mt-3 text-2xl font-semibold text-white">{{ $verifiedMerge ? 'Verified merged and marked Done' : ($manualCompletionEvent ? 'Manually confirmed merged and marked Done' : 'Approved and marked Done') }}</h2>
             <p class="mt-2 text-sm text-zinc-500">The complete attempt history and append-only event timeline remain below.</p>
             @if ($verifiedMerge)
                 <a class="mt-4 inline-flex items-center gap-2 font-mono text-xs text-emerald-300 hover:text-emerald-200" href="https://github.com/{{ $run->github_repository }}/commit/{{ $verifiedMerge->github_merge_commit_sha }}" target="_blank" rel="noopener">Merge commit {{ substr($verifiedMerge->github_merge_commit_sha, 0, 12) }} ↗</a>

@@ -193,6 +193,22 @@ class WorkflowController extends Controller
         return back()->with('status', 'Workflow moved to '.$run->currentStage->name.' with a new audited attempt.');
     }
 
+    public function completeAfterManualMerge(
+        Request $request,
+        WorkflowRun $workflowRun,
+        StageRun $stageRun,
+    ): RedirectResponse {
+        $this->assertOwner($request, $workflowRun);
+
+        try {
+            $this->engine->completeAfterManualMerge($workflowRun, $stageRun, $request->user());
+        } catch (WorkflowConflict $exception) {
+            return back()->withErrors(['workflow' => $exception->getMessage()]);
+        }
+
+        return back()->with('status', 'Manual merge confirmed and workflow marked Done.');
+    }
+
     public function cancel(Request $request, WorkflowRun $workflowRun): RedirectResponse
     {
         $this->assertOwner($request, $workflowRun);

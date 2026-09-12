@@ -224,6 +224,9 @@ class WorkflowPagesTest extends TestCase
         $this->actingAs($other)->post(route('workflows.attempts.override-stage', [$run, $run->activeStageRun]), [
             'target_stage_id' => $run->definition->stages()->where('key', 'human_review')->sole()->id,
         ])->assertNotFound();
+        $this->actingAs($other)
+            ->post(route('workflows.attempts.complete-after-manual-merge', [$run, $run->activeStageRun]))
+            ->assertNotFound();
     }
 
     public function test_manual_controls_render_and_support_pause_resume_and_validation(): void

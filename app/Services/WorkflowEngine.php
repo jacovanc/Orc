@@ -290,6 +290,112 @@ class WorkflowEngine
         }, 3);
     }
 
+    public function completeAfterManualMerge(
+        WorkflowRun $run,
+        StageRun $expectedAttempt,
+        User $actor,
+    ): WorkflowRun {
+        return DB::transaction(function () use ($run, $expectedAttempt, $actor) {
+            $lockedRun = WorkflowRun::query()->lockForUpdate()->findOrFail($run->getKey());
+            $attempt = StageRun::query()
+                ->with('stage')
+                ->lockForUpdate()
+                ->findOrFail($expectedAttempt->getKey());
+
+            $this->assertOwnedBy($lockedRun, $actor);
+            $this->assertAttemptBelongsToRun($lockedRun, $attempt);
+
+            $existing = WorkflowEvent::query()
+                ->where('stage_run_id', $attempt->getKey())
+                ->where('type', 'workflow.manually_completed')
+                ->first();
+            if ($lockedRun->status === WorkflowStatus::Completed && $existing) {
+                return $lockedRun->fresh(['currentStage', 'activeStageRun']);
+            }
+            if ($lockedRun->status !== WorkflowStatus::Running) {
+                throw new WorkflowConflict('Only a running workflow at a human-controlled stage can be marked done.');
+            }
+            $this->assertCurrentActiveAttempt($lockedRun, $attempt);
+            if ($attempt->stage->type !== StageType::Human) {
+                throw new WorkflowConflict('Stop or move an active agent before manually marking the workflow done.');
+            }
+
+            $mergeStage = WorkflowStage::query()
+                ->where('workflow_definition_id', $lockedRun->workflow_definition_id)
+                ->where('key', 'merge')
+                ->where('type', StageType::Agent)
+                ->first();
+            $done = WorkflowStage::query()
+                ->where('workflow_definition_id', $lockedRun->workflow_definition_id)
+                ->where('key', 'done')
+                ->where('type', StageType::Terminal)
+                ->lockForUpdate()
+                ->first();
+            if (! $mergeStage || ! $done) {
+                throw new WorkflowConflict('This workflow definition does not support post-merge manual completion.');
+            }
+
+            $publication = StageRun::query()
+                ->where('workflow_run_id', $lockedRun->getKey())
+                ->whereNotNull('github_pull_request_number')
+                ->whereNotNull('github_pull_request_url')
+                ->latest('attempt_number')
+                ->first();
+            if (! $publication) {
+                throw new WorkflowConflict('A bound pull request is required before manually marking the workflow done.');
+            }
+            $this->assertGitHubPullRequest(
+                $lockedRun,
+                $publication->github_pull_request_number,
+                $publication->github_pull_request_url,
+            );
+
+            $now = now();
+            $attempt->forceFill([
+                'status' => StageRunStatus::Completed,
+                'outcome' => 'manual_merge_confirmed',
+                'active_slot' => null,
+                'completed_at' => $now,
+            ])->save();
+            $manualMetadata = [
+                'stage_key' => $attempt->stage->key,
+                'attempt_number' => $attempt->attempt_number,
+                'outcome' => 'manual_merge_confirmed',
+                'source' => 'human_manual_merge',
+                'github_pull_request_number' => $publication->github_pull_request_number,
+                'github_pull_request_url' => $publication->github_pull_request_url,
+                'verification' => 'owner_attested',
+            ];
+            $this->recordEvent($lockedRun, $attempt, 'stage.completed', $actor, $manualMetadata);
+            $this->recordEvent($lockedRun, $attempt, 'workflow.manually_completed', $actor, $manualMetadata);
+
+            $lockedRun->forceFill([
+                'status' => WorkflowStatus::Completed,
+                'current_stage_id' => $done->getKey(),
+                'completed_at' => $now,
+                'cancelled_at' => null,
+                'failed_at' => null,
+            ])->save();
+            $terminalAttempt = $this->createStageAttempt(
+                $lockedRun,
+                $done,
+                $attempt->attempt_number + 1,
+                $now,
+            );
+            $this->recordEvent($lockedRun, $terminalAttempt, 'stage.entered', $actor, [
+                'stage_key' => $done->key,
+                'attempt_number' => $terminalAttempt->attempt_number,
+                'source' => 'human_manual_merge',
+            ]);
+            $this->recordEvent($lockedRun, $terminalAttempt, 'workflow.completed', $actor, [
+                'source' => 'human_manual_merge',
+                'github_pull_request_url' => $publication->github_pull_request_url,
+            ]);
+
+            return $lockedRun->fresh(['currentStage', 'activeStageRun']);
+        }, 3);
+    }
+
     /**
      * The sole transition primitive. The run lock serializes competing completions,
      * while the expected attempt ID prevents a late callback completing a newer stage.

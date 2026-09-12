@@ -131,6 +131,8 @@ Real Explanation uses `real_explanation` in a fresh Orb after the v5 Human Revie
 
 Cancellation closes the Laravel attempt first, transactionally preventing any late completion. When a thread is already bound, Laravel also queues a signed, retryable command to the trusted controller to call `thread.cancel()` on that exact thread. External GitHub or Git operations already in flight may still finish and must be inspected.
 
+If the owner merges the exact bound pull request directly on GitHub while a v4+ run is waiting at a human-controlled state, **Already merged on GitHub? → Mark done** provides an explicit recovery path. It is unavailable during an active agent stage or without the run's bound canonical-repository PR. The engine closes the expected current human attempt, enters the existing immutable Done state, and records `workflow.manually_completed` plus `workflow.completed` as owner-authored append-only events. This is labelled owner-attested rather than agent-verified and never fabricates `stage.merge_verified` or a merge SHA.
+
 Self-registration is opt-in and source-default-disabled. Independently, workflow start and every human transition into an agent stage require the authenticated owner's immutable `users.can_trigger_amp` permission and the run's verified connection snapshot. New registrations default false, and profile/email changes never alter this permission. Production registration is disabled. Owner/project authorization, exact connection/thread/stage binding, and connection-scoped signatures prevent another account or controller from directing the owner's Amp identity.
 
 ## Current limitations

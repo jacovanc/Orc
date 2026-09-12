@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Workflow;
 
+use App\Domain\Workflow\Exceptions\WorkflowConflict;
 use App\Domain\Workflow\StageRunStatus;
 use App\Domain\Workflow\WorkflowStatus;
 use App\Models\AmpLaunch;
@@ -217,6 +218,58 @@ class MergeWorkflowTest extends TestCase
             'github_pull_request_head_sha' => $this->sha('a'),
             'github_merge_commit_sha' => $this->sha('f'),
         ])->assertAccepted()->assertJsonPath('accepted', false);
+    }
+
+    public function test_owner_can_mark_a_human_gated_run_done_after_manually_merging_the_bound_pr(): void
+    {
+        $run = $this->toMerge($this->startRun(), $this->sha('a'));
+        $merge = $run->activeStageRun;
+        $thread = $this->threadId(3);
+
+        try {
+            $this->engine->completeAfterManualMerge($run, $merge, $this->user);
+            $this->fail('An active agent stage must not be manually completed.');
+        } catch (WorkflowConflict $exception) {
+            $this->assertStringContainsString('Stop or move an active agent', $exception->getMessage());
+        }
+
+        $this->claimAndAcknowledge($merge->ampLaunch, $thread);
+        $this->reportMerge($merge->ampLaunch, $thread, 503, 'blocked', $this->sha('a'));
+        $this->complete($merge->ampLaunch, $thread, 'blocked', $this->reportUrl(503));
+        $run->refresh()->load(['currentStage', 'activeStageRun', 'stageRuns.stage', 'events']);
+        $blocked = $run->activeStageRun;
+
+        $this->actingAs($this->user)->get(route('workflows.show', $run))
+            ->assertOk()
+            ->assertSee('Already merged on GitHub?')
+            ->assertSee('Mark done')
+            ->assertSee('owner-attested audit event');
+
+        $other = User::factory()->create();
+        $this->actingAs($other)
+            ->post(route('workflows.attempts.complete-after-manual-merge', [$run, $blocked]))
+            ->assertNotFound();
+
+        $this->actingAs($this->user)
+            ->post(route('workflows.attempts.complete-after-manual-merge', [$run, $blocked]))
+            ->assertSessionHas('status', 'Manual merge confirmed and workflow marked Done.');
+        $this->actingAs($this->user)
+            ->post(route('workflows.attempts.complete-after-manual-merge', [$run, $blocked]))
+            ->assertSessionHas('status', 'Manual merge confirmed and workflow marked Done.');
+
+        $run->refresh()->load(['currentStage', 'activeStageRun', 'stageRuns', 'events']);
+        $this->assertSame(WorkflowStatus::Completed, $run->status);
+        $this->assertSame('done', $run->currentStage->key);
+        $this->assertNull($run->activeStageRun);
+        $this->assertSame('manual_merge_confirmed', $blocked->fresh()->outcome);
+        $this->assertSame(1, $run->events->where('type', 'workflow.manually_completed')->count());
+        $this->assertSame(1, $run->events->where('type', 'workflow.completed')->count());
+        $this->assertSame(0, $run->events->where('type', 'stage.merge_verified')->count());
+
+        $this->actingAs($this->user)->get(route('workflows.show', $run))
+            ->assertOk()
+            ->assertSee('Manually confirmed merged and marked Done')
+            ->assertDontSee('Recovery controls');
     }
 
     private function startRun(): WorkflowRun
